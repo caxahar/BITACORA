@@ -1,0 +1,720 @@
+<!DOCTYPE html>
+<html lang="es"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"><title>Habits</title>
+<link rel="manifest" href="./manifest.json">
+<meta name="theme-color" content="#0d1117">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=JetBrains+Mono:wght@400;600&family=Fraunces:ital,wght@1,500&display=swap');
+*{font-family:Inter,sans-serif} .mono{font-family:'JetBrains Mono',monospace} .serif{font-family:'Fraunces',serif}
+@keyframes bounceFlame{0%,100%{transform:translateY(0) scale(1)}50%{transform:translateY(-6px) scale(1.08)}}
+@keyframes glow{0%,100%{filter:drop-shadow(0 0 10px currentColor)}50%{filter:drop-shadow(0 0 22px currentColor)}}
+@keyframes duoPop{0%{transform:scale(.5)}40%{transform:scale(1.25)}70%{transform:scale(.95)}100%{transform:scale(1)}}
+@keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-4px)}75%{transform:translateX(4px)}}
+@keyframes confetti{0%{transform:translateY(0) rotate(0) scale(0);opacity:1}100%{transform:translateY(-80px) rotate(720deg) scale(1);opacity:0}}
+@keyframes modeSwitch{0%{transform:scale(.9);opacity:.4}100%{transform:scale(1);opacity:1}}
+body{background:#0d1117;color:#e6edf3}
+.icon-nav{stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.scrollbar-thin::-webkit-scrollbar{height:6px} .scrollbar-thin::-webkit-scrollbar-thumb{background:#30363d;border-radius:4px}
+textarea{font-family:'JetBrains Mono',monospace}
+</style></head><body class="pb-[90px]">
+<div id="app" class="max-w-[720px] mx-auto"></div>
+<div id="toast" class="fixed bottom-[100px] left-1/2 -translate-x-1/2 bg-white text-black px-5 py-2 rounded-full font-bold hidden z-[99] mono text-[13px] text-center max-w-[90%]"></div>
+<div id="modal" class="fixed inset-0 bg-black/70 backdrop-blur-sm hidden z-[100] flex items-center justify-center p-4">
+  <div class="bg-[#161b22] border border-[#30363d] rounded-[20px] p-5 w-full max-w-[360px]">
+    <h3 id="modalTitle" class="font-bold"></h3><p id="modalHint" class="mono text-[11px] text-[#7d8590] mt-1"></p>
+    <input id="modalInput" class="mt-3 w-full bg-[#0d1117] border border-[#21262d] rounded-[12px] p-3 mono text-[13px] outline-none focus:border-[#58CC02]" placeholder="CenaTarde">
+    <div class="flex gap-2 mt-4"><button onclick="closeModal()" class="flex-1 py-3 rounded-full bg-[#21262d] mono text-[12px]">Cancelar</button><button id="modalSave" class="flex-1 py-3 rounded-full bg-white text-black mono text-[12px] font-bold">Guardar</button></div>
+  </div>
+</div>
+
+<script>
+/* ============================================================
+   CONFIG — pega acá la URL /exec de tu deploy de Apps Script
+   (Implementar > Nueva implementación > Aplicación web > Acceso: Cualquier persona)
+   ============================================================ */
+const WEBAPP_URL = "PEGA_AQUI_TU_URL_/exec";
+
+const DAY = ['🅳','🅻','🅼','🆆','🅹','🆅','🆂'];
+const DAY_FULL = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
+const PALETTE = ['#58CC02','#3B82F6','#A855F7','#F59E0B','#EC4899','#14B8A6','#F97316','#6366F1'];
+let HABIT_COLORS = {};
+
+let STATE = { data:null, tab:0, chartMode:'total', calMonthOffset:0, pendingLog:null, pendingQueue:[], rawView:{} };
+
+/* -------- iconos SVG monocromáticos -------- */
+const ICONS = {
+  flame: (active)=>`<svg viewBox="0 0 24 24" width="22" height="22" class="icon-nav" stroke-width="${active?2.4:2}"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg>`,
+  calendar: (active)=>`<svg viewBox="0 0 24 24" width="22" height="22" class="icon-nav" stroke-width="${active?2.4:2}"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>`,
+  chart: (active)=>`<svg viewBox="0 0 24 24" width="22" height="22" class="icon-nav" stroke-width="${active?2.4:2}"><path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="m19 9-5 5-4-4-3 3"/></svg>`,
+  edit: (active)=>`<svg viewBox="0 0 24 24" width="22" height="22" class="icon-nav" stroke-width="${active?2.4:2}"><path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.4 2.6a2 2 0 1 1 3 3L9 18l-4 1 1-4Z"/></svg>`,
+  snowflake: ()=>`<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M2 12h20M4.9 4.9l14.2 14.2M19.1 4.9 4.9 19.1"/></svg>`,
+  chevronL: ()=>`<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m15 18-6-6 6-6"/></svg>`,
+  chevronR: ()=>`<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m9 18 6-6-6-6"/></svg>`,
+};
+
+function pad2(n){ return String(n).padStart(2,'0'); }
+function fmtKey(d){ return String(d.getFullYear()).slice(-2)+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate()); }
+function keyToDate(k){ const [yy,mm,dd]=k.split('-').map(Number); return new Date(2000+yy, mm-1, dd); }
+function showToast(m){ const t=document.getElementById('toast'); t.textContent=m; t.classList.remove('hidden'); setTimeout(()=>t.classList.add('hidden'),3200); }
+function colorFor(title){ if(!HABIT_COLORS[title]) HABIT_COLORS[title]=PALETTE[Object.keys(HABIT_COLORS).length % PALETTE.length]; return HABIT_COLORS[title]; }
+
+/* ============================================================
+   CLIENTE DE RED
+   ============================================================
+   callServer(action, params) funciona en dos modos:
+   - Dentro de Apps Script (HtmlService): usa el bridge nativo
+     google.script.run — no hay CORS porque es mismo origen.
+   - Servido desde otro dominio (GitHub Pages, etc.): usa JSONP
+     contra WEBAPP_URL, que rodea CORS por completo (Apps Script
+     Web Apps no soportan el preflight OPTIONS de fetch normal).
+*/
+let _jsonpCounter = 0;
+function jsonpCall(action, params){
+  return new Promise((resolve, reject)=>{
+    if(!WEBAPP_URL || WEBAPP_URL.indexOf('PEGA_AQUI') !== -1){
+      reject(new Error('DEMO')); return;
+    }
+    const cbName = '_jsonpCb_' + (_jsonpCounter++) + '_' + Date.now();
+    const timeout = setTimeout(()=>{ cleanup(); reject(new Error('Timeout esperando al servidor')); }, 15000);
+    function cleanup(){ clearTimeout(timeout); delete window[cbName]; const s=document.getElementById(cbName); if(s) s.remove(); }
+    window[cbName] = (resp)=>{
+      cleanup();
+      if(resp && resp.ok) resolve(resp.data);
+      else reject(new Error((resp && resp.error) || 'Error desconocido del servidor'));
+    };
+    const qs = new URLSearchParams({ action, callback: cbName, ...params }).toString();
+    const script = document.createElement('script');
+    script.id = cbName;
+    script.src = WEBAPP_URL + '?' + qs;
+    script.onerror = ()=>{ cleanup(); reject(new Error('No se pudo contactar el servidor')); };
+    document.body.appendChild(script);
+  });
+}
+
+function callServer(action, params){
+  params = params || {};
+  if(typeof google!=='undefined' && google.script && google.script.run){
+    const fnMap = { initialData:'getInitialData', addLog:'addLogLine', setMode:'setMode', rawWindow:'getRawWindow', mergeWindow:'mergeRecentLogLines', resetSeries:'resetHabitSeries' };
+    const argsMap = {
+      initialData: [], addLog:[params.title, params.estado, params.motivo],
+      setMode:[params.mode], rawWindow:[params.title, params.days],
+      mergeWindow:[params.title, params.text, params.days], resetSeries:[params.title]
+    };
+    return new Promise((resolve, reject)=>{
+      google.script.run.withSuccessHandler(resolve).withFailureHandler(e=>reject(new Error(e.message||String(e))))[fnMap[action]](...argsMap[action]);
+    });
+  }
+  return jsonpCall(action, params);
+}
+
+/* ============================================================
+   OFFLINE: cola de pendientes + caché de datos + auto-sync
+   ============================================================ */
+const QUEUE_KEY = 'habitTrackerPendingQueue_v1';
+const DATA_CACHE_KEY = 'habitTrackerDataCache_v1';
+
+function loadQueue(){ try{ return JSON.parse(localStorage.getItem(QUEUE_KEY)||'[]'); }catch(e){ return []; } }
+function saveQueueToStorage(q){ try{ localStorage.setItem(QUEUE_KEY, JSON.stringify(q)); }catch(e){} }
+function cacheData(data){ try{ localStorage.setItem(DATA_CACHE_KEY, JSON.stringify(data)); }catch(e){} }
+function loadCachedData(){ try{ return JSON.parse(localStorage.getItem(DATA_CACHE_KEY)||'null'); }catch(e){ return null; } }
+
+function buildLogLine(estado, motivoRaw){
+  const now=new Date();
+  const dayEmoji=DAY[now.getDay()];
+  const key=fmtKey(now);
+  let motivo=(motivoRaw||'').trim().replace(/\s+/g,'').replace(/^#/,'').substring(0,30)||'Hecho';
+  motivo=motivo.charAt(0).toUpperCase()+motivo.slice(1);
+  const raw=`${dayEmoji}${key}${estado}#${motivo}`;
+  const score= estado==='✅'?1: estado==='🟩'?0.5:-1;
+  return {key, estado, motivo, raw, score};
+}
+
+function enqueueLog(title, estado, motivoRaw){
+  const line=buildLogLine(estado, motivoRaw);
+  const item={ id:'q_'+Date.now()+'_'+Math.random().toString(36).slice(2,8), title, pending:true, ...line };
+  STATE.pendingQueue.push(item);
+  saveQueueToStorage(STATE.pendingQueue);
+  return item;
+}
+
+function cancelPending(id){
+  STATE.pendingQueue=(STATE.pendingQueue||[]).filter(i=>i.id!==id);
+  saveQueueToStorage(STATE.pendingQueue);
+  renderTab();
+  showToast('Registro pendiente eliminado');
+}
+
+function getEffectiveData(){
+  const data=STATE.data;
+  if(!data) return data;
+  if(!STATE.pendingQueue || !STATE.pendingQueue.length) return data;
+  const habitsMap={};
+  data.habits.forEach(h=>{ habitsMap[h.title]={ ...h, logs:[...h.logs] }; });
+  STATE.pendingQueue.forEach(item=>{
+    if(!habitsMap[item.title]) habitsMap[item.title]={ title:item.title, logs:[], capital:0, lastLog:null, seriesCount:1 };
+    habitsMap[item.title].logs.push(item);
+  });
+  const habits=Object.values(habitsMap).map(h=>{
+    const sorted=[...h.logs].sort((a,b)=>a.key.localeCompare(b.key));
+    return { ...h, logs:sorted, lastLog:sorted[sorted.length-1]||null, capital:sorted.reduce((s,l)=>s+Math.max(0,l.score),0) };
+  });
+  const allLogs=[...data.allLogs, ...STATE.pendingQueue];
+  return { ...data, habits, allLogs };
+}
+
+let syncInFlight=false;
+function trySync(showFeedback){
+  if(syncInFlight) return;
+  if(!STATE.pendingQueue || !STATE.pendingQueue.length) return;
+  if(navigator.onLine===false) return;
+  syncInFlight=true;
+  const item=STATE.pendingQueue[0];
+  callServer('addLog', {title:item.title, estado:item.estado, motivo:item.motivo}).then(r=>{
+    syncInFlight=false;
+    STATE.pendingQueue.shift();
+    saveQueueToStorage(STATE.pendingQueue);
+    if(STATE.data) STATE.data.streakState = r.streakState || STATE.data.streakState;
+    // aviso conocido: el servidor fecha el log con SU día actual, no
+    // con el día en que lo hiciste offline — si difieren, avisamos.
+    if(r.dateUsed && r.dateUsed !== item.key){
+      showToast(`⚠️ "${item.title}" se guardó con fecha ${r.dateUsed} (lo hiciste el ${item.key}) — corrígelo en Log > historial editable`);
+    }
+    if(STATE.pendingQueue.length){
+      trySync(showFeedback);
+    } else {
+      if(showFeedback && !(r.dateUsed && r.dateUsed !== item.key)) showToast('☁️ Todo sincronizado');
+      load();
+    }
+    renderTab();
+  }).catch(e=>{
+    syncInFlight=false;
+    if(showFeedback) showToast('⚠️ Sin conexión con el servidor, reintento luego');
+  });
+}
+
+window.addEventListener('online', ()=>{ renderTab(); trySync(true); });
+window.addEventListener('offline', ()=> renderTab());
+setInterval(()=>trySync(false), 30000);
+
+function load(){
+  STATE.pendingQueue = loadQueue();
+  callServer('initialData', {}).then(data=>{
+    STATE.data=data;
+    cacheData(data);
+    render();
+    trySync(false);
+  }).catch(err=>{
+    if(err.message === 'DEMO'){
+      const today=new Date();
+      STATE.data = {
+        calendarName:'Habits (demo — falta WEBAPP_URL)', today:{emoji:DAY[today.getDay()], key:fmtKey(today)},
+        habits:[
+          {title:'🪷 Meditar', capital:4, seriesCount:1, logs:[{key:fmtKey(today),estado:'✅',raw:'demo',motivo:'Hecho',score:1}]},
+          {title:'📵 Digital', capital:2.5, seriesCount:1, logs:[]}
+        ],
+        allLogs:[],
+        streakState:{ mode:'resiliente', freezesAvailable:1, freezeUsedDates:[], repair:null }
+      };
+      render();
+      showToast('⚙️ Configura WEBAPP_URL arriba en el código para conectar tu Calendar real');
+      return;
+    }
+    const cached=loadCachedData();
+    if(cached){
+      STATE.data=cached;
+      render();
+      showToast('📴 Mostrando última versión guardada (sin conexión)');
+    } else {
+      document.getElementById('app').innerHTML='<div class="p-6 mono text-sm">Error: '+err.message+'<br>Revisa que WEBAPP_URL sea la URL /exec correcta y que el deploy sea "Cualquier persona".</div>';
+    }
+  });
+}
+
+function getByDateMap(allLogs){
+  const m={}; allLogs.forEach(l=>{ if(!m[l.key]) m[l.key]=[]; m[l.key].push(l); }); return m;
+}
+
+function computeStreakClient(allLogs, mode, streakState){
+  const byDate=getByDateMap(allLogs);
+  const today=new Date();
+  let streak=0, freezesLeft=streakState.freezesAvailable||0;
+  let cursor=new Date(today);
+  const todayKey=fmtKey(today);
+  if(!byDate[todayKey] || byDate[todayKey].length===0) cursor.setDate(cursor.getDate()-1);
+  for(let i=0;i<400;i++){
+    const key=fmtKey(cursor);
+    const logs=byDate[key]||[];
+    const hasFail=logs.some(l=>l.estado==='❎');
+    const dayEmpty=logs.length===0;
+    const dayFailed=hasFail||dayEmpty;
+    if(!dayFailed){ streak++; }
+    else if(mode==='resiliente' && freezesLeft>0){ freezesLeft--; streak++; }
+    else break;
+    cursor.setDate(cursor.getDate()-1);
+  }
+  return streak;
+}
+
+function render(){
+  const data=getEffectiveData();
+  const byDate=getByDateMap(data.allLogs);
+  const streakState=data.streakState;
+  const streak=computeStreakClient(data.allLogs, streakState.mode, streakState);
+
+  data.habits.forEach(h=>colorFor(h.title));
+
+  const isHardcore = streakState.mode==='hardcore';
+  const modeColor = isHardcore ? '#ff4b4b' : '#58CC02';
+
+  document.getElementById('app').innerHTML = `
+  <div class="px-4 pt-6">
+    <div class="flex justify-between items-center">
+      <div class="text-[26px] font-[800] tracking-tighter">${data.today.emoji}${data.today.key} <span class="text-[13px] font-normal text-[#7d8590]">${data.calendarName}</span>${STATE.pendingQueue && STATE.pendingQueue.length ? ` <span class="text-[11px] mono text-[#f59e0b] align-middle">⏳${STATE.pendingQueue.length}</span>` : ''}</div>
+      <div class="flex bg-[#161b22] rounded-full p-1 border border-[#21262d]">
+        <button onclick="switchMode('resiliente')" class="px-3 py-1 rounded-full text-[11px] mono font-bold transition ${streakState.mode==='resiliente'?'bg-[#58CC02] text-black':'text-[#7d8590]'}">Resiliente</button>
+        <button onclick="switchMode('hardcore')" class="px-3 py-1 rounded-full text-[11px] mono font-bold transition ${streakState.mode==='hardcore'?'bg-white text-black':'text-[#7d8590]'}">Hardcore</button>
+      </div>
+    </div>
+    <div class="mono text-[10.5px] text-[#5d666f] mt-1.5 leading-relaxed">
+      ${isHardcore
+        ? 'Un fallo rompe la racha. Se repara con 3 días perfectos (cualquier hábito) en 72h.'
+        : 'Un fallo al día se cubre con freeze si tienes uno activo. Ganas 1 freeze cada 7 días de racha, tope 2.'}
+      ${!isHardcore ? ` • ${'❄'.repeat(streakState.freezesAvailable||0)} ${streakState.freezesAvailable||0}/2 freeze` : ''}
+      ${isHardcore && streakState.repair ? ` • ⏳ Reparando: ${streakState.repair.perfectsDone.length}/3 perfectos` : ''}
+    </div>
+  </div>
+
+  <div class="px-4 mt-6" id="tabContent"></div>
+
+  <div class="fixed bottom-0 left-0 right-0 flex justify-center pointer-events-none">
+    <div class="pointer-events-auto w-full max-w-[520px] mx-4 mb-4 rounded-[20px] bg-[#161b22]/90 backdrop-blur-xl border border-[#21262d] h-[64px] flex items-center justify-around px-2">
+      ${[0,1,2,3].map(k=>{
+        const iconFn=[ICONS.flame,ICONS.calendar,ICONS.chart,ICONS.edit][k];
+        const active=STATE.tab===k;
+        return `<button onclick="STATE.tab=${k}; render()" class="flex flex-col items-center justify-center min-w-[56px] h-[48px] rounded-[14px] transition ${active?'text-[#58CC02]':'text-[#7d8590]'}">${iconFn(active)}</button>`;
+      }).join('')}
+    </div>
+  </div>
+  `;
+
+  renderTab();
+}
+
+function switchMode(mode){
+  callServer('setMode', {mode}).then(state=>{
+    STATE.data.streakState=state;
+    showToast(mode==='hardcore' ? 'Modo Hardcore 💀' : 'Modo Resiliente 🛡️');
+    render();
+  }).catch(e=>{
+    STATE.data.streakState.mode=mode;
+    showToast((mode==='hardcore' ? 'Modo Hardcore 💀' : 'Modo Resiliente 🛡️') + ' (solo local, sin servidor)');
+    render();
+  });
+}
+
+function renderTab(){
+  const data=getEffectiveData();
+  const byDate=getByDateMap(data.allLogs);
+  const streakState=data.streakState;
+  const streak=computeStreakClient(data.allLogs, streakState.mode, streakState);
+  const isHardcore=streakState.mode==='hardcore';
+  const modeColor=isHardcore?'#ff4b4b':'#58CC02';
+  const el=document.getElementById('tabContent');
+
+  const last7=[]; for(let i=6;i>=0;i--){ let dt=new Date(); dt.setDate(dt.getDate()-i); let k=fmtKey(dt); let logs=byDate[k]||[]; let state='empty'; if(logs.length){ if(logs.some(l=>l.estado==='❎')) state='fail'; else if(logs.some(l=>l.estado==='✅')) state='ok'; else state='half'; } last7.push({date:dt, key:k, state}); }
+
+  if(STATE.tab===0){
+    el.innerHTML = `
+      <div class="rounded-[28px] bg-[#161b22] border border-[#21262d] p-8 text-center relative overflow-hidden animate-[modeSwitch_.3s_ease]" style="color:${modeColor}">
+        <div class="absolute -top-20 -right-20 w-64 h-64 rounded-full blur-3xl" style="background:${modeColor}1a"></div>
+        <div class="text-[84px] leading-none ${streak>0?'animate-[bounceFlame_1.2s_infinite]':''}"><span class="${streak>0?'animate-[glow_1.8s_infinite] inline-block':''}">🔥</span></div>
+        <div class="text-[48px] font-[800] tracking-tighter mt-2 text-white">${streak} <span class="text-[14px] mono font-normal text-[#7d8590]">días racha</span></div>
+        <div class="mono text-[11px] text-[#5d666f]">Capital total ${data.habits.reduce((s,h)=>s+h.capital,0).toFixed(1)} • Piso 0 activo</div>
+      </div>
+
+      <div class="mt-6 rounded-[20px] bg-[#161b22] border border-[#21262d] p-5">
+        <h3 class="mono text-[11px] tracking-widest text-[#7d8590] font-bold mb-4">7 DÍAS</h3>
+        <div class="grid grid-cols-7 gap-2">
+          ${last7.map(s=>`
+            <div class="flex flex-col items-center gap-2">
+              <div class="w-[44px] h-[44px] rounded-full flex items-center justify-center text-[20px] border-2 relative ${s.state==='ok'?'bg-[#1a2e1a] border-[#58CC02] animate-[duoPop_.45s] shadow-[0_0_12px_#58CC02aa]': s.state==='fail'?'bg-[#2a1515] border-[#ff4b4b] animate-[shake_.4s]': s.state==='half'?'bg-[#1e2a15] border-[#a3e635]': 'bg-[#0d1117] border-[#21262d]'}">
+                ${s.state==='ok'?'✅': s.state==='fail'?'❎': s.state==='half'?'🟩':'·'}
+              </div>
+              <span class="mono text-[10px] text-[#7d8590]">${DAY[s.date.getDay()]}</span>
+              <span class="mono text-[9px] text-[#4a525c]">${s.key.slice(6)}</span>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+
+      <div class="mt-4 rounded-[20px] bg-[#0d1117] border border-[#21262d] p-4">
+        <h4 class="mono text-[11px] font-bold mb-3">INPUT RÁPIDO HOY ${data.today.emoji}${data.today.key}</h4>
+        ${data.habits.map(h=>`
+          <div class="flex justify-between items-center py-2 border-b border-[#21262d]/50 last:border-0">
+            <div class="flex items-center gap-2"><div class="w-2 h-2 rounded-full" style="background:${colorFor(h.title)}"></div><div><div class="font-semibold text-[14px]">${h.title}</div><div class="mono text-[10px] text-[#5d666f]">${h.lastLog?.raw||'sin log'}</div></div></div>
+            <div class="flex gap-1"><button onclick="openModal('${h.title.replace(/'/g,"\\'")}','✅')" class="w-10 h-10 rounded-full bg-[#1a2e1a] border border-[#58CC02]/30">✅</button><button onclick="openModal('${h.title.replace(/'/g,"\\'")}','🟩')" class="w-10 h-10 rounded-full bg-[#1e2a15] border border-[#21262d]">🟩</button><button onclick="openModal('${h.title.replace(/'/g,"\\'")}','❎')" class="w-10 h-10 rounded-full bg-[#2a1515] border border-[#21262d]">❎</button></div>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  }
+
+  if(STATE.tab===1) renderCalendarTab(el);
+  if(STATE.tab===2){ renderAnalysisTab(el); setTimeout(drawChart,80); }
+  if(STATE.tab===3) renderLogTab(el);
+}
+
+/* ================= PESTAÑA 2: Calendario navegable + heatmap ================= */
+function renderCalendarTab(el){
+  const data=getEffectiveData(); const byDate=getByDateMap(data.allLogs);
+  const streakState=data.streakState;
+
+  const base=new Date(); base.setMonth(base.getMonth()+STATE.calMonthOffset); base.setDate(1);
+  const year=base.getFullYear(), month=base.getMonth();
+  const firstDow=(new Date(year,month,1).getDay());
+  const daysInMonth=new Date(year,month+1,0).getDate();
+  const monthLabel=base.toLocaleDateString('es-ES',{month:'long',year:'numeric'});
+
+  const cells=[];
+  for(let i=0;i<firstDow;i++) cells.push(null);
+  for(let d=1; d<=daysInMonth; d++){
+    const dt=new Date(year,month,d);
+    const k=fmtKey(dt);
+    const logs=byDate[k]||[];
+    let status='empty';
+    if(dt> new Date()) status='future';
+    else if(logs.some(l=>l.estado==='❎')) status = streakState.freezeUsedDates?.includes(k) ? 'frozen' : 'fail';
+    else if(logs.length && logs.every(l=>l.estado==='✅')) status='perfect';
+    else if(logs.length) status='ok';
+    cells.push({d, k, status});
+  }
+
+  const perfectCount=cells.filter(c=>c && c.status==='perfect').length;
+  const pastCount=cells.filter(c=>c && (c.status!=='future')).length;
+
+  let maxStreak=0, curS=0;
+  const sortedDays=[...new Set(data.allLogs.map(l=>l.key))].sort();
+  sortedDays.forEach(k=>{
+    const logs=byDate[k];
+    if(logs.some(l=>l.estado==='❎')) curS=0; else { curS++; maxStreak=Math.max(maxStreak,curS); }
+  });
+
+  el.innerHTML = `
+    <div class="space-y-5">
+      <div class="rounded-[20px] bg-[#161b22] border border-[#21262d] p-5">
+        <div class="flex items-center justify-between mb-1">
+          <h3 class="font-bold serif italic text-[16px]">Historial de racha</h3>
+          <div class="mono text-[10px] text-[#5d666f] bg-[#0d1117] px-2 py-1 rounded-full border border-[#21262d]">Mayor: ${maxStreak}d</div>
+        </div>
+        <div class="mono text-[11px] text-[#7d8590]">Congeladas usadas: ${(streakState.freezeUsedDates||[]).length} • Días perfectos este mes: ${perfectCount}/${pastCount||daysInMonth}</div>
+      </div>
+
+      <div class="rounded-[20px] bg-[#0d1117] border border-[#21262d] p-4">
+        <div class="flex items-center justify-between mb-3">
+          <button onclick="STATE.calMonthOffset--; render()" class="w-8 h-8 rounded-full bg-[#161b22] border border-[#21262d] flex items-center justify-center">${ICONS.chevronL()}</button>
+          <div class="mono text-[13px] font-bold capitalize">${monthLabel}</div>
+          <button onclick="STATE.calMonthOffset=Math.min(0,STATE.calMonthOffset+1); render()" class="w-8 h-8 rounded-full bg-[#161b22] border border-[#21262d] flex items-center justify-center ${STATE.calMonthOffset>=0?'opacity-30 pointer-events-none':''}">${ICONS.chevronR()}</button>
+        </div>
+        <div class="grid grid-cols-7 gap-1 mb-2">${DAY_FULL.map(d=>`<div class="text-center mono text-[9px] font-bold text-[#7d8590] py-1">${d[0]}</div>`).join('')}</div>
+        <div class="grid grid-cols-7 gap-1.5">
+          ${cells.map(c=>{
+            if(!c) return `<div class="aspect-square"></div>`;
+            let bg='#0d1117', bd='#21262d', txt='#484f58', extra='';
+            if(c.status==='perfect'){ bg='#58CC02'; bd='#fff'; txt='#000'; extra='font-bold'; }
+            else if(c.status==='ok'){ bg='#1a3a14'; bd='#58CC02'; txt='#58CC02'; }
+            else if(c.status==='frozen'){ bg='#0d3a4a'; bd='#38bdf8'; txt='#38bdf8'; }
+            else if(c.status==='fail'){ bg='#21262d'; bd='#ff4b4b55'; txt='#ff7b72'; }
+            else if(c.status==='future'){ txt='#2a3138'; }
+            return `<div class="aspect-square rounded-[10px] border-2 flex items-center justify-center mono text-[11px] ${extra}" style="background:${bg};border-color:${bd};color:${txt}">
+              ${c.status==='frozen' ? ICONS.snowflake() : c.d}
+            </div>`;
+          }).join('')}
+        </div>
+        <div class="flex flex-wrap gap-3 mt-4 mono text-[9px] text-[#7d8590]">
+          <span class="flex items-center gap-1"><div class="w-2.5 h-2.5 rounded-sm" style="background:#58CC02"></div>perfecto</span>
+          <span class="flex items-center gap-1"><div class="w-2.5 h-2.5 rounded-sm" style="background:#1a3a14;border:1px solid #58CC02"></div>cumplido</span>
+          <span class="flex items-center gap-1"><div class="w-2.5 h-2.5 rounded-sm" style="background:#0d3a4a;border:1px solid #38bdf8"></div>freeze usado</span>
+          <span class="flex items-center gap-1"><div class="w-2.5 h-2.5 rounded-sm" style="background:#21262d;border:1px solid #ff4b4b55"></div>fallo</span>
+        </div>
+      </div>
+
+      <div class="rounded-[20px] bg-[#0d1117] border border-[#21262d] p-5">
+        <h3 class="font-bold mono text-[11px] tracking-widest text-[#7d8590] mb-3">DENSIDAD SEMESTRAL • SIN ROJO • GRIS→VERDE</h3>
+        <div class="grid grid-flow-col grid-rows-7 gap-[3px] overflow-x-auto scrollbar-thin pb-2">
+          ${(()=>{ let out=''; for(let i=179;i>=0;i--){ let dt=new Date(); dt.setDate(dt.getDate()-i); let k=fmtKey(dt); let score=(byDate[k]||[]).reduce((s,l)=>s+l.score,0);
+            let bg="#161b22"; if(score>=1.5) bg="#39d353"; else if(score>=1) bg="#26a641"; else if(score>=0.5) bg="#006d32"; else if(score>0) bg="#0e4429";
+            out+=`<div title="${k} • ${score}" class="w-[12px] h-[12px] rounded-[3px]" style="background:${bg}"></div>`; } return out; })()}
+        </div>
+        <div class="flex gap-2 mt-3 mono text-[10px] text-[#5d666f] items-center"><span>Menos</span><div class="flex gap-[3px]"><div class="w-3 h-3 rounded-sm bg-[#161b22]"></div><div class="w-3 h-3 rounded-sm bg-[#0e4429]"></div><div class="w-3 h-3 rounded-sm bg-[#006d32]"></div><div class="w-3 h-3 rounded-sm bg-[#26a641]"></div><div class="w-3 h-3 rounded-sm bg-[#39d353]"></div></div><span>Más</span></div>
+      </div>
+    </div>
+  `;
+}
+
+/* ================= PESTAÑA 3: Análisis (Plano X,Y + tabla creciente) ================= */
+function renderAnalysisTab(el){
+  const data=getEffectiveData();
+  el.innerHTML = `
+    <div class="space-y-4">
+      <div class="rounded-[20px] bg-[#0d1117] border border-[#21262d] p-4">
+        <div class="flex justify-between items-center flex-wrap gap-2">
+          <h3 class="font-bold serif italic text-[16px]">Plano X · Y</h3>
+          <div class="flex bg-[#161b22] rounded-full p-1 border border-[#21262d]">
+            <button onclick="STATE.chartMode='habits'; renderTab(); setTimeout(drawChart,50)" class="px-2.5 py-1 rounded-full text-[10px] mono ${STATE.chartMode!=='total'?'bg-white text-black':'text-[#7d8590]'}">HÁBITOS</button>
+            <button onclick="STATE.chartMode='total'; renderTab(); setTimeout(drawChart,50)" class="px-2.5 py-1 rounded-full text-[10px] mono ${STATE.chartMode==='total'?'bg-white text-black':'text-[#7d8590]'}">SUMA</button>
+          </div>
+        </div>
+        <p class="mono text-[10px] text-[#5d666f] mt-2">ok=0.5 perfecto=1 fail=-1 • piso 0 • toca un punto para ver el detalle del día</p>
+        <div class="relative">
+          <canvas id="chart" class="w-full h-[220px] mt-4 bg-[#161b22] rounded-[12px]"></canvas>
+        </div>
+        <div id="chartTip" class="mono text-[11px] mt-2 text-[#7d8590] min-h-[16px]">Toca el gráfico para ver el detalle de un día</div>
+        <div class="flex flex-wrap gap-3 mt-3">
+          ${data.habits.map(h=>`<div class="flex items-center gap-1.5 mono text-[10px]"><div class="w-3 h-[3px] rounded-full" style="background:${colorFor(h.title)}"></div>${h.title}</div>`).join('')}
+          <div class="flex items-center gap-1.5 mono text-[10px]"><div class="w-3 h-[3px] rounded-full bg-white"></div>Suma total</div>
+        </div>
+      </div>
+
+      <div class="rounded-[20px] bg-[#161b22] border border-[#21262d] p-4 overflow-hidden">
+        <h4 class="mono text-[11px] font-bold tracking-widest mb-1">TABLA CRUDA</h4>
+        <p class="mono text-[10px] text-[#5d666f] mb-3">Creciente desde hoy hacia atrás — desliza para ver más días del semestre</p>
+        <div id="rawTableWrap" class="overflow-x-auto scrollbar-thin -mx-4 px-4"></div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-3">
+        <div class="rounded-[16px] bg-[#161b22] border border-[#21262d] p-4"><div class="mono text-[10px] text-[#5d666f]">CUMPLIMIENTO</div><div class="text-[22px] font-bold">${(()=>{ const ok=data.allLogs.filter(l=>l.estado!=='❎').length; const total=data.allLogs.length; return total?Math.round(ok/total*100):0; })()}%</div><div class="mono text-[10px]">${data.allLogs.filter(l=>l.estado!=='❎').length}/${data.allLogs.length}</div></div>
+        <div class="rounded-[16px] bg-[#161b22] border border-[#21262d] p-4"><div class="mono text-[10px] text-[#5d666f]">TOP MOTIVO ❎</div><div class="text-[13px] font-bold truncate">${(()=>{ const m={}; data.allLogs.forEach(l=>{ if(l.estado==='❎' && l.motivo) m[l.motivo]=(m[l.motivo]||0)+1; }); const top=Object.entries(m).sort((a,b)=>b[1]-a[1])[0]; return top? '#'+top[0]+' x'+top[1] : 'Sin datos'; })()}</div></div>
+      </div>
+    </div>
+  `;
+  renderRawTable();
+}
+
+function renderRawTable(){
+  const wrap=document.getElementById('rawTableWrap'); if(!wrap) return;
+  const data=getEffectiveData(); const byDate=getByDateMap(data.allLogs);
+  const span = wrap.dataset.span ? parseInt(wrap.dataset.span) : 30;
+  wrap.dataset.span = span;
+
+  const days=[]; for(let i=span-1;i>=0;i--){ let dt=new Date(); dt.setDate(dt.getDate()-i); days.push(dt); }
+
+  wrap.innerHTML = `<table class="border-collapse"><thead><tr><th class="sticky left-0 bg-[#161b22] mono text-[10px] p-1 pr-3 text-left z-10">HAB</th>${days.map(dt=>`<th class="mono text-[9px] p-1 min-w-[30px] text-center">${pad2(dt.getMonth()+1)}/${pad2(dt.getDate())}</th>`).join('')}</tr></thead><tbody>
+    ${data.habits.map(h=>{
+      const logsByKey={}; h.logs.forEach(l=>logsByKey[l.key]=l);
+      return `<tr><td class="sticky left-0 bg-[#161b22] mono text-[10px] p-1 pr-3 border-r border-[#21262d] z-10" style="color:${colorFor(h.title)}">${h.title.slice(0,8)}</td>${days.map(dt=>{
+        const k=fmtKey(dt); const found=logsByKey[k];
+        const bg = found?.estado==='❎' ? 'bg-[#ff4444]/10' : found ? 'bg-[#58CC02]/5' : '';
+        return `<td class="text-center p-1 min-w-[30px] border border-[#21262d]/50 ${bg}">${found?found.estado:'·'}</td>`;
+      }).join('')}</tr>`;
+    }).join('')}
+  </tbody></table>
+  <button onclick="growTable()" class="mt-3 mono text-[10px] text-[#7d8590] border border-[#21262d] rounded-full px-3 py-1.5 ${span>=183?'hidden':''}">Cargar 30 días más ↓ (${span}/183)</button>
+  `;
+}
+function growTable(){
+  const wrap=document.getElementById('rawTableWrap');
+  const current=parseInt(wrap.dataset.span||'30');
+  wrap.dataset.span = Math.min(183, current+30);
+  renderRawTable();
+}
+
+function drawChart(){
+  const canvas=document.getElementById('chart'); if(!canvas) return;
+  const ctx=canvas.getContext('2d'); const data=getEffectiveData(); const byDate=getByDateMap(data.allLogs);
+  const cssW=canvas.offsetWidth, cssH=220;
+  canvas.width=cssW*2; canvas.height=cssH*2; ctx.setTransform(2,0,0,2,0,0);
+  const pad={l:28,r:10,t:16,b:22}; const cw=cssW-pad.l-pad.r; const ch=cssH-pad.t-pad.b;
+
+  const days=[]; for(let i=59;i>=0;i--){ let dt=new Date(); dt.setDate(dt.getDate()-i); days.push({dt, k:fmtKey(dt)}); }
+  const perHabit={}; data.habits.forEach(h=>{ perHabit[h.title]=[]; let cum=0; days.forEach(d=>{ const mine=h.logs.filter(l=>l.key===d.k); const score=mine.reduce((s,l)=>s+l.score,0); cum=Math.max(0,cum+score); perHabit[h.title].push(cum); }); });
+  const total=days.map((_,i)=> Object.values(perHabit).reduce((s,arr)=>s+arr[i],0));
+  const maxVal=Math.max(1,...total, ...Object.values(perHabit).flat());
+
+  ctx.clearRect(0,0,cssW,cssH);
+  ctx.strokeStyle='#21262d'; ctx.setLineDash([4,4]);
+  for(let i=0;i<=4;i++){ const y=pad.t + ch - (i/4)*ch; ctx.beginPath(); ctx.moveTo(pad.l,y); ctx.lineTo(pad.l+cw,y); ctx.stroke();
+    ctx.setLineDash([]); ctx.fillStyle='#5d666f'; ctx.font='9px monospace'; ctx.fillText(Math.round(maxVal*i/4), 2, y+3); ctx.setLineDash([4,4]); }
+  ctx.setLineDash([]);
+
+  const pointsTotal = total.map((v,i)=>({x: pad.l + (i/(days.length-1))*cw, y: pad.t + ch - (v/maxVal)*ch, v, k:days[i].k}));
+
+  if(STATE.chartMode!=='total'){
+    Object.entries(perHabit).forEach(([title,arr])=>{
+      ctx.strokeStyle=colorFor(title); ctx.lineWidth=2; ctx.beginPath();
+      arr.forEach((v,i)=>{ const x=pad.l + (i/(days.length-1))*cw; const y=pad.t + ch - (v/maxVal)*ch; if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y); });
+      ctx.stroke();
+    });
+  }
+  ctx.strokeStyle='white'; ctx.lineWidth=3; ctx.beginPath();
+  pointsTotal.forEach((p,i)=>{ if(i===0) ctx.moveTo(p.x,p.y); else ctx.lineTo(p.x,p.y); }); ctx.stroke();
+
+  function handleTouch(clientX){
+    const rect=canvas.getBoundingClientRect(); const x=clientX-rect.left;
+    let closest=pointsTotal[0], minDist=Infinity;
+    pointsTotal.forEach(p=>{ const d=Math.abs(p.x-x); if(d<minDist){ minDist=d; closest=p; } });
+    const tip=document.getElementById('chartTip'); if(!tip) return;
+    const logsThatDay=byDate[closest.k]||[];
+    const detail = logsThatDay.length ? logsThatDay.map(l=>`${l.estado} ${l.motivo||''}`).join(' · ') : 'sin registros';
+    tip.innerHTML = `<strong class="text-white">${closest.k}</strong> · capital ${closest.v.toFixed(1)} · ${detail}`;
+  }
+  canvas.onmousemove = (e)=>handleTouch(e.clientX);
+  canvas.ontouchstart = canvas.ontouchmove = (e)=>{ handleTouch(e.touches[0].clientX); e.preventDefault(); };
+}
+
+/* ================= PESTAÑA 4: Log detallado + historial crudo editable ================= */
+function renderLogTab(el){
+  const data=getEffectiveData();
+  const queue=STATE.pendingQueue||[];
+  const offline = navigator.onLine===false;
+
+  const banner = (queue.length || offline) ? `
+    <div class="rounded-[16px] p-3 mb-4 flex items-center justify-between gap-2 ${offline?'bg-[#3a2a0d] border border-[#f59e0b]/40':'bg-[#0d2a1a] border border-[#58CC02]/30'}">
+      <div class="mono text-[10.5px] ${offline?'text-[#f59e0b]':'text-[#58CC02]'}">
+        ${offline ? '📴 Sin conexión — se guarda local y sincroniza solo al volver' : `⏳ ${queue.length} registro${queue.length>1?'s':''} pendiente${queue.length>1?'s':''} de sincronizar`}
+      </div>
+      ${(!offline && queue.length) ? `<button onclick="trySync(true)" class="mono text-[10px] font-bold bg-white text-black rounded-full px-3 py-1.5 whitespace-nowrap">Sincronizar</button>` : ''}
+    </div>
+  ` : '';
+
+  el.innerHTML = `
+    <div class="rounded-[20px] bg-[#161b22] border border-[#21262d] p-5">
+      <h3 class="font-bold mb-1 serif italic text-[16px]">Inputs detallados</h3>
+      <p class="mono text-[10px] text-[#5d666f] mb-4">Con contexto obligatorio en fallos ❎ — permite entender por qué. En ✅/🟩 el contexto es opcional, para anotar qué hizo que el día saliera bien.</p>
+      ${banner}
+      ${data.habits.map(h=>`
+        <div class="rounded-[14px] bg-[#0d1117] border border-[#21262d] p-3 mb-3">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2"><div class="w-2.5 h-2.5 rounded-full" style="background:${colorFor(h.title)}"></div><div class="font-semibold">${h.title} • capital ${h.capital.toFixed(1)} • ${h.seriesCount} serie${h.seriesCount>1?'s':''}</div></div>
+            <button onclick="toggleRawView('${h.title.replace(/'/g,"\\'")}')" class="mono text-[10px] text-[#7d8590] border border-[#21262d] rounded-full px-2.5 py-1 whitespace-nowrap">${STATE.rawView[h.title]?.open ? 'Ocultar' : 'Ver/editar historial'}</button>
+          </div>
+          <div class="mono text-[10px] text-[#5d666f] mt-1 max-h-[100px] overflow-auto space-y-0.5">
+            ${h.logs.slice(-6).map(l=> l.pending
+              ? `<div class="flex items-center justify-between gap-2 text-[#f59e0b]"><span>⏳ ${l.raw}</span><button onclick="cancelPending('${l.id}')" class="text-[#7d8590] px-1">✕</button></div>`
+              : `<div>${l.raw}</div>`
+            ).join('') || 'sin logs'}
+          </div>
+          <div id="rawView_${h.title.replace(/[^a-zA-Z0-9]/g,'_')}"></div>
+          <div class="flex gap-2 mt-3"><button onclick="openModal('${h.title.replace(/'/g,"\\'")}','✅')" class="flex-1 py-2 rounded-full bg-[#1a2e1a] border border-[#58CC02]/30">✅ Perfecto</button><button onclick="openModal('${h.title.replace(/'/g,"\\'")}','🟩')" class="flex-1 py-2 rounded-full bg-[#1e2a15] border border-[#21262d]">🟩 Ok</button><button onclick="openModal('${h.title.replace(/'/g,"\\'")}','❎')" class="flex-1 py-2 rounded-full bg-[#2a1515] border border-[#21262d]">❎ Fail</button></div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+
+  Object.keys(STATE.rawView).forEach(title=>{ if(STATE.rawView[title]?.open) renderRawViewBlock(title); });
+}
+
+function rawViewElId(title){ return 'rawView_'+title.replace(/[^a-zA-Z0-9]/g,'_'); }
+
+function toggleRawView(title){
+  const cur = STATE.rawView[title] || { open:false, days:14, loading:false, data:null, editText:'' };
+  cur.open = !cur.open;
+  STATE.rawView[title] = cur;
+  if(cur.open && !cur.data) loadRawView(title, cur.days);
+  else renderRawViewBlock(title);
+}
+
+function loadRawView(title, days){
+  const cur = STATE.rawView[title];
+  cur.loading = true; cur.days = days;
+  renderRawViewBlock(title);
+  callServer('rawWindow', {title, days}).then(data=>{
+    cur.loading = false;
+    cur.data = data;
+    cur.editText = data.windowText;
+    renderRawViewBlock(title);
+  }).catch(e=>{
+    cur.loading = false;
+    cur.error = e.message;
+    renderRawViewBlock(title);
+  });
+}
+
+function saveRawView(title){
+  const cur = STATE.rawView[title];
+  const textarea = document.getElementById(rawViewElId(title)+'_textarea');
+  const text = textarea ? textarea.value : cur.editText;
+  cur.saving = true;
+  renderRawViewBlock(title);
+  callServer('mergeWindow', {title, text, days: cur.days}).then(r=>{
+    cur.saving = false;
+    showToast(`💾 Guardado — ${r.savedLines} líneas en la ventana, ${r.totalLines} en total`);
+    cur.data = null;
+    loadRawView(title, cur.days);
+    load(); // refresca todo (racha, gráficos, etc. pueden depender de esto)
+  }).catch(e=>{
+    cur.saving = false;
+    showToast('⚠️ No se pudo guardar: ' + e.message);
+    renderRawViewBlock(title);
+  });
+}
+
+function renderRawViewBlock(title){
+  const holder = document.getElementById(rawViewElId(title));
+  if(!holder) return;
+  const cur = STATE.rawView[title];
+  if(!cur || !cur.open){ holder.innerHTML=''; return; }
+
+  if(cur.loading){
+    holder.innerHTML = `<div class="mono text-[10px] text-[#5d666f] mt-3">Cargando historial…</div>`;
+    return;
+  }
+  if(cur.error){
+    holder.innerHTML = `<div class="mono text-[10px] text-[#ff7b72] mt-3">⚠️ ${cur.error}</div>`;
+    return;
+  }
+  if(!cur.data) return;
+
+  holder.innerHTML = `
+    <div class="mt-3 rounded-[12px] bg-[#161b22] border border-[#21262d] p-3">
+      <div class="flex items-center justify-between flex-wrap gap-2 mb-2">
+        <div class="mono text-[9px] text-[#5d666f]">Editando desde ${cur.data.windowFrom} • ${cur.data.totalLines} líneas en total en esta serie • ${cur.data.seriesCount} serie${cur.data.seriesCount>1?'s':''} detectada${cur.data.seriesCount>1?'s':''}</div>
+        <div class="flex bg-[#0d1117] rounded-full p-1 border border-[#21262d]">
+          ${[7,14,30].map(d=>`<button onclick="loadRawView('${title.replace(/'/g,"\\'")}', ${d})" class="px-2 py-0.5 rounded-full text-[9px] mono ${cur.days===d?'bg-white text-black':'text-[#7d8590]'}">${d}d</button>`).join('')}
+        </div>
+      </div>
+      <textarea id="${rawViewElId(title)}_textarea" class="w-full bg-[#0d1117] border border-[#21262d] rounded-[10px] p-2 text-[11px] text-[#e6edf3] outline-none focus:border-[#58CC02]" rows="${Math.max(4, cur.editText.split('\n').length+1)}">${cur.editText}</textarea>
+      <p class="mono text-[9px] text-[#5d666f] mt-1">Una línea por día, formato ${'\u{1F145}'}26-07-30${'\u2705'}#Motivo. Borrar una línea borra ese día; una línea nueva crea/reemplaza el día correspondiente. Solo se toca esta ventana — el resto del historial no se modifica.</p>
+      <div class="flex gap-2 mt-2">
+        <button onclick="saveRawView('${title.replace(/'/g,"\\'")}')" class="flex-1 py-2 rounded-full bg-white text-black mono text-[11px] font-bold" ${cur.saving?'disabled':''}>${cur.saving?'Guardando…':'Guardar cambios'}</button>
+        <button onclick="loadRawView('${title.replace(/'/g,"\\'")}', ${cur.days})" class="px-4 py-2 rounded-full bg-[#21262d] mono text-[11px]">Recargar</button>
+      </div>
+    </div>
+  `;
+}
+
+/* ================= Modal ================= */
+function openModal(title, estado){
+  STATE.pendingLog={title, estado};
+  document.getElementById('modalTitle').textContent=title+' '+estado;
+  document.getElementById('modalHint').textContent = estado==='❎' ? 'Motivo obligatorio ej: CenaTarde' : 'Contexto opcional — ¿qué hizo que saliera bien?';
+  document.getElementById('modalInput').value='';
+  document.getElementById('modal').classList.remove('hidden');
+  document.getElementById('modalInput').focus();
+}
+function closeModal(){ document.getElementById('modal').classList.add('hidden'); STATE.pendingLog=null; }
+document.getElementById('modalSave').onclick=()=>{
+  const motivo=document.getElementById('modalInput').value.trim();
+  const {title, estado}=STATE.pendingLog;
+  if(estado==='❎' && !motivo){ alert('Motivo obligatorio en fallos, ej: CenaTarde'); return; }
+  closeModal();
+
+  enqueueLog(title, estado, motivo);
+  renderTab();
+  if(estado==='✅') launchConfetti();
+  showToast(navigator.onLine===false ? '📴 Guardado local — se sincroniza al volver la señal' : '💾 Guardado, sincronizando...');
+  trySync(true);
+};
+function launchConfetti(){
+  for(let i=0;i<24;i++){ const d=document.createElement('div'); d.style.position='fixed'; d.style.left=(50+Math.random()*20-10)+'%'; d.style.top='50%'; d.style.width='8px'; d.style.height='8px'; d.style.background=PALETTE[i%PALETTE.length]; d.style.borderRadius='50%'; d.style.animation=`confetti ${0.6+Math.random()*0.4}s ease-out forwards`; d.style.zIndex='999'; document.body.appendChild(d); setTimeout(()=>d.remove(),1000); }
+}
+
+/* ================= PWA: registro de Service Worker ================= */
+if('serviceWorker' in navigator){
+  window.addEventListener('load', ()=>{ navigator.serviceWorker.register('./sw.js').catch(()=>{}); });
+}
+
+window.onload=load;
+</script>
+</body></html>
