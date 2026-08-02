@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="es"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"><title>Habits</title>
 <link rel="manifest" href="./manifest.json">
@@ -34,7 +35,7 @@ textarea{font-family:'JetBrains Mono',monospace}
    CONFIG — pega acá la URL /exec de tu deploy de Apps Script
    (Implementar > Nueva implementación > Aplicación web > Acceso: Cualquier persona)
    ============================================================ */
-const WEBAPP_URL = "https://script.google.com/macros/s/AKfycbyxJU8CVdDKEbkjrMyrni-wzIWcu9vwedSlHh794vtFLBxNv954gmKWGbcIXJjCePHB/exec";
+const WEBAPP_URL = "PEGA_AQUI_TU_URL_/exec";
 
 const DAY = ['🅳','🅻','🅼','🆆','🅹','🆅','🆂'];
 const DAY_FULL = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
@@ -58,7 +59,14 @@ function pad2(n){ return String(n).padStart(2,'0'); }
 function fmtKey(d){ return String(d.getFullYear()).slice(-2)+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate()); }
 function keyToDate(k){ const [yy,mm,dd]=k.split('-').map(Number); return new Date(2000+yy, mm-1, dd); }
 function showToast(m){ const t=document.getElementById('toast'); t.textContent=m; t.classList.remove('hidden'); setTimeout(()=>t.classList.add('hidden'),3200); }
-function colorFor(title){ if(!HABIT_COLORS[title]) HABIT_COLORS[title]=PALETTE[Object.keys(HABIT_COLORS).length % PALETTE.length]; return HABIT_COLORS[title]; }
+function colorFor(title){
+  if(HABIT_COLORS[title]) return HABIT_COLORS[title];
+  const habit = STATE.data && STATE.data.habits && STATE.data.habits.find(h=>h.title===title);
+  const palette = STATE.data && STATE.data.colorPalette;
+  const fromCalendar = habit && habit.colorId && palette && palette[habit.colorId] && palette[habit.colorId].background;
+  HABIT_COLORS[title] = fromCalendar || PALETTE[Object.keys(HABIT_COLORS).length % PALETTE.length];
+  return HABIT_COLORS[title];
+}
 
 /* ============================================================
    CLIENTE DE RED
@@ -352,9 +360,9 @@ function renderTab(){
       <div class="mt-4 rounded-[20px] bg-[#0d1117] border border-[#21262d] p-4">
         <h4 class="mono text-[11px] font-bold mb-3">INPUT RÁPIDO HOY ${data.today.emoji}${data.today.key}</h4>
         ${data.habits.map(h=>`
-          <div class="flex justify-between items-center py-2 border-b border-[#21262d]/50 last:border-0">
-            <div class="flex items-center gap-2"><div class="w-2 h-2 rounded-full" style="background:${colorFor(h.title)}"></div><div><div class="font-semibold text-[14px]">${h.title}</div><div class="mono text-[10px] text-[#5d666f]">${h.lastLog?.raw||'sin log'}</div></div></div>
-            <div class="flex gap-1"><button onclick="openModal('${h.title.replace(/'/g,"\\'")}','✅')" class="w-10 h-10 rounded-full bg-[#1a2e1a] border border-[#58CC02]/30">✅</button><button onclick="openModal('${h.title.replace(/'/g,"\\'")}','🟩')" class="w-10 h-10 rounded-full bg-[#1e2a15] border border-[#21262d]">🟩</button><button onclick="openModal('${h.title.replace(/'/g,"\\'")}','❎')" class="w-10 h-10 rounded-full bg-[#2a1515] border border-[#21262d]">❎</button></div>
+          <div class="flex justify-between items-center gap-2 py-2 border-b border-[#21262d]/50 last:border-0">
+            <div class="flex items-center gap-2 flex-1 min-w-0"><div class="w-2 h-2 rounded-full flex-shrink-0" style="background:${colorFor(h.title)}"></div><div class="min-w-0"><div class="font-semibold text-[14px] truncate">${h.title}</div><div class="mono text-[10px] text-[#5d666f] truncate">${h.lastLog?.raw||'sin log'}</div></div></div>
+            <div class="flex gap-1 flex-shrink-0"><button onclick="openModal('${h.title.replace(/'/g,"\\'")}','✅')" class="w-10 h-10 rounded-full bg-[#1a2e1a] border border-[#58CC02]/30">✅</button><button onclick="openModal('${h.title.replace(/'/g,"\\'")}','🟩')" class="w-10 h-10 rounded-full bg-[#1e2a15] border border-[#21262d]">🟩</button><button onclick="openModal('${h.title.replace(/'/g,"\\'")}','❎')" class="w-10 h-10 rounded-full bg-[#2a1515] border border-[#21262d]">❎</button></div>
           </div>
         `).join('')}
       </div>
@@ -442,12 +450,41 @@ function renderCalendarTab(el){
 
       <div class="rounded-[20px] bg-[#0d1117] border border-[#21262d] p-5">
         <h3 class="font-bold mono text-[11px] tracking-widest text-[#7d8590] mb-3">DENSIDAD SEMESTRAL • SIN ROJO • GRIS→VERDE</h3>
-        <div class="grid grid-flow-col grid-rows-7 gap-[3px] overflow-x-auto scrollbar-thin pb-2">
-          ${(()=>{ let out=''; for(let i=179;i>=0;i--){ let dt=new Date(); dt.setDate(dt.getDate()-i); let k=fmtKey(dt); let score=(byDate[k]||[]).reduce((s,l)=>s+l.score,0);
-            let bg="#161b22"; if(score>=1.5) bg="#39d353"; else if(score>=1) bg="#26a641"; else if(score>=0.5) bg="#006d32"; else if(score>0) bg="#0e4429";
-            out+=`<div title="${k} • ${score}" class="w-[12px] h-[12px] rounded-[3px]" style="background:${bg}"></div>`; } return out; })()}
+        <div class="flex gap-[3px]">
+          <div class="grid grid-rows-7 gap-[3px] mono text-[8px] text-[#5d666f] pr-1">
+            ${['D','L','M','X','J','V','S'].map(d=>`<div class="h-[12px] flex items-center">${d}</div>`).join('')}
+          </div>
+          <div class="grid grid-flow-col grid-rows-7 gap-[3px] overflow-x-auto scrollbar-thin pb-2">
+            ${(()=>{
+              const weeks = 26;
+              const todayDow = new Date().getDay(); // 0=Dom .. 6=Sáb
+              const gridStart = new Date(); gridStart.setHours(0,0,0,0);
+              gridStart.setDate(gridStart.getDate() - todayDow - (weeks-1)*7); // domingo de la semana más vieja mostrada
+              const hoy = new Date(); hoy.setHours(0,0,0,0);
+              let out='';
+              for(let col=0; col<weeks; col++){
+                for(let row=0; row<7; row++){
+                  const dt = new Date(gridStart); dt.setDate(dt.getDate() + col*7 + row);
+                  if(dt > hoy){ out += `<div class="w-[12px] h-[12px] rounded-[3px]"></div>`; continue; }
+                  const k = fmtKey(dt);
+                  const logsDelDia = byDate[k]||[];
+                  const avg = logsDelDia.length ? logsDelDia.reduce((s,l)=>s+l.score,0)/logsDelDia.length : null;
+                  let bg="#161b22"; // sin ningún registro ese día
+                  if(avg!==null){
+                    if(avg<=0) bg="#30363d";       // hubo actividad, pero neto cero o negativo -- distinto de "sin datos"
+                    else if(avg>=1) bg="#39d353";  // todo perfecto
+                    else if(avg>=0.75) bg="#26a641";
+                    else if(avg>=0.5) bg="#006d32";
+                    else bg="#0e4429";
+                  }
+                  out += `<div title="${k} • ${avg===null?'sin registros':'promedio '+avg.toFixed(2)}" class="w-[12px] h-[12px] rounded-[3px]" style="background:${bg}"></div>`;
+                }
+              }
+              return out;
+            })()}
+          </div>
         </div>
-        <div class="flex gap-2 mt-3 mono text-[10px] text-[#5d666f] items-center"><span>Menos</span><div class="flex gap-[3px]"><div class="w-3 h-3 rounded-sm bg-[#161b22]"></div><div class="w-3 h-3 rounded-sm bg-[#0e4429]"></div><div class="w-3 h-3 rounded-sm bg-[#006d32]"></div><div class="w-3 h-3 rounded-sm bg-[#26a641]"></div><div class="w-3 h-3 rounded-sm bg-[#39d353]"></div></div><span>Más</span></div>
+        <div class="flex gap-2 mt-3 mono text-[10px] text-[#5d666f] items-center"><span>Menos</span><div class="flex gap-[3px]"><div class="w-3 h-3 rounded-sm bg-[#161b22]"></div><div class="w-3 h-3 rounded-sm bg-[#30363d]"></div><div class="w-3 h-3 rounded-sm bg-[#0e4429]"></div><div class="w-3 h-3 rounded-sm bg-[#006d32]"></div><div class="w-3 h-3 rounded-sm bg-[#26a641]"></div><div class="w-3 h-3 rounded-sm bg-[#39d353]"></div></div><span>Más</span></div>
       </div>
     </div>
   `;
@@ -583,7 +620,7 @@ function renderLogTab(el){
       <h3 class="font-bold mb-1 serif italic text-[16px]">Inputs detallados</h3>
       <p class="mono text-[10px] text-[#5d666f] mb-4">Con contexto obligatorio en fallos ❎ — permite entender por qué. En ✅/🟩 el contexto es opcional, para anotar qué hizo que el día saliera bien.</p>
       ${banner}
-      ${data.habits.map(h=>`
+      ${data.habits.map((h,idx)=>`
         <div class="rounded-[14px] bg-[#0d1117] border border-[#21262d] p-3 mb-3">
           <div class="flex items-center justify-between">
             <div class="flex items-center gap-2"><div class="w-2.5 h-2.5 rounded-full" style="background:${colorFor(h.title)}"></div><div class="font-semibold">${h.title} • capital ${h.capital.toFixed(1)} • ${h.seriesCount} serie${h.seriesCount>1?'s':''}</div></div>
@@ -595,7 +632,7 @@ function renderLogTab(el){
               : `<div>${l.raw}</div>`
             ).join('') || 'sin logs'}
           </div>
-          <div id="rawView_${h.title.replace(/[^a-zA-Z0-9]/g,'_')}"></div>
+          <div id="rawView_${idx}"></div>
           <div class="flex gap-2 mt-3"><button onclick="openModal('${h.title.replace(/'/g,"\\'")}','✅')" class="flex-1 py-2 rounded-full bg-[#1a2e1a] border border-[#58CC02]/30">✅ Perfecto</button><button onclick="openModal('${h.title.replace(/'/g,"\\'")}','🟩')" class="flex-1 py-2 rounded-full bg-[#1e2a15] border border-[#21262d]">🟩 Ok</button><button onclick="openModal('${h.title.replace(/'/g,"\\'")}','❎')" class="flex-1 py-2 rounded-full bg-[#2a1515] border border-[#21262d]">❎ Fail</button></div>
         </div>
       `).join('')}
@@ -605,7 +642,11 @@ function renderLogTab(el){
   Object.keys(STATE.rawView).forEach(title=>{ if(STATE.rawView[title]?.open) renderRawViewBlock(title); });
 }
 
-function rawViewElId(title){ return 'rawView_'+title.replace(/[^a-zA-Z0-9]/g,'_'); }
+function rawViewElId(title){
+  const data = getEffectiveData();
+  const idx = data.habits.findIndex(h=>h.title===title);
+  return 'rawView_'+(idx>=0 ? idx : title.replace(/[^a-zA-Z0-9]/g,'_'));
+}
 
 function toggleRawView(title){
   const cur = STATE.rawView[title] || { open:false, days:14, loading:false, data:null, editText:'' };
