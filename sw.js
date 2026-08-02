@@ -1,4 +1,4 @@
-const CACHE_NAME = 'habits-shell-v1';
+const CACHE_NAME = 'habits-shell-v2'; // <- subir este número purga cualquier caché vieja al instante
 const SHELL_FILES = ['./', './index.html', './manifest.json'];
 
 self.addEventListener('install', (event) => {
@@ -20,24 +20,24 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-  // Nunca cachear el backend (Apps Script / JSONP) -- siempre red real,
-  // el manejo de "sin conexión" para eso ya lo hace la cola en localStorage.
+  // Nunca cachear el backend (Apps Script / JSONP) -- siempre red real.
   if (url.hostname.includes('script.google.com') || url.hostname.includes('googleusercontent.com')) {
     return;
   }
 
+  // NETWORK-FIRST: siempre intenta traer la versión fresca primero.
+  // La caché queda solo como respaldo para cuando no hay conexión --
+  // así manifest.json / íconos / index.html nunca vuelven a quedar
+  // "pegados" en una versión vieja como pasó antes (ver CACHE_NAME).
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      const network = fetch(event.request)
-        .then((resp) => {
-          if (resp && resp.ok) {
-            const copy = resp.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
-          }
-          return resp;
-        })
-        .catch(() => cached);
-      return cached || network;
-    })
+    fetch(event.request)
+      .then((resp) => {
+        if (resp && resp.ok) {
+          const copy = resp.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+        }
+        return resp;
+      })
+      .catch(() => caches.match(event.request))
   );
 });
