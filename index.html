@@ -65,8 +65,16 @@ textarea{font-family:'JetBrains Mono',monospace}
       </div>
     </div>
     <div id="timerRunningView" class="hidden">
-      <div id="timerCountdownDisplay" class="text-[56px] font-[800] tracking-tighter mt-2 mono">05:00</div>
-      <div class="mono text-[10px] text-[#5d666f]">⏱ corriendo…</div>
+      <div class="relative w-[176px] h-[176px] mx-auto mt-2">
+        <svg viewBox="0 0 120 120" class="w-full h-full -rotate-90">
+          <circle cx="60" cy="60" r="52" fill="none" stroke="#21262d" stroke-width="9"/>
+          <circle id="timerRing" cx="60" cy="60" r="52" fill="none" stroke="#58CC02" stroke-width="9"
+                  stroke-linecap="round" stroke-dasharray="326.7" stroke-dashoffset="0"
+                  style="transition:stroke-dashoffset .45s linear, stroke .3s"/>
+        </svg>
+        <div id="timerCountdownDisplay" class="absolute inset-0 flex items-center justify-center text-[34px] font-[800] tracking-tighter mono">05:00</div>
+      </div>
+      <div class="mono text-[10px] text-[#5d666f] mt-1">⏱ corriendo…</div>
       <button onclick="cancelEmergentTimer()" class="w-full mt-6 py-3 rounded-full bg-[#21262d] mono text-[12px]">Cancelar</button>
     </div>
     <div id="timerDoneView" class="hidden">
@@ -117,43 +125,60 @@ function colorFor(title){
 }
 
 /* ============================================================
-   COMANDOS EN UBICACIÓN — parser de ⏱ (timer de sesión) y
-   checklist (rutinas compuestas). Sintaxis, todo opcional:
+   COMANDOS EN UBICACIÓN — parser de ⏱ (timer de sesión), ⏳ (gracia
+   extra, opcional) y checklist (rutinas compuestas). Todo opcional:
      ⏱30          -> sesión de 30min, ancla = inicio real del evento de HOY
+     ⏳15          -> gracia extra: 15min ADICIONALES tras el fin de la
+                      sesión antes de bloquear "Perfecto" (default: 0)
      - Paso 1      -> ítem de checklist
      - Paso 2      -> ítem de checklist
    ============================================================ */
 function parseLocationCommands(locationText){
   const lines = (locationText||'').split('\n').map(l=>l.trim()).filter(Boolean);
   let timerMinutes = null;
+  let graceMinutes = 0;
   const checklist = [];
   lines.forEach(line=>{
     const timerMatch = line.match(/^⏱\s*(\d+)/);
     if(timerMatch){ timerMinutes = parseInt(timerMatch[1],10); return; }
+    const graceMatch = line.match(/^⏳\s*(\d+)/);
+    if(graceMatch){ graceMinutes = parseInt(graceMatch[1],10); return; }
     const stepMatch = line.match(/^-\s*(.+)/);
     if(stepMatch){ checklist.push(stepMatch[1].trim()); }
   });
-  return { timerMinutes, checklist };
+  return { timerMinutes, graceMinutes, checklist };
 }
 
 // Estado del timer de sesión de un hábito -- el ancla (todayStartTime) viene
 // del backend, tomada directo de la ocurrencia real de HOY en Calendar, así
-// que no se puede evadir escribiendo cualquier cosa en el cliente. OJO: el
+// que no se puede evadir escribiendo cualquier cosa en el cliente. La gracia
+// (⏳) se suma DESPUÉS del fin de la sesión, no la reemplaza. OJO: el
 // bloqueo en sí (deshabilitar "Perfecto") es solo client-side por decisión
 // explícita -- alguien pegándole directo al endpoint puede seguir mandando
 // ✅ tarde. Ver nota en el resumen de la conversación.
 function getHabitTimerState(habit){
-  const { timerMinutes } = parseLocationCommands(habit.location);
+  const { timerMinutes, graceMinutes } = parseLocationCommands(habit.location);
   if(!timerMinutes || !habit.todayStartTime) return { hasTimer:false, locked:false };
-  const deadline = new Date(habit.todayStartTime).getTime() + timerMinutes*60000;
+  const sessionEnd = new Date(habit.todayStartTime).getTime() + timerMinutes*60000;
+  const deadline = sessionEnd + (graceMinutes||0)*60000;
   const now = Date.now();
-  return { hasTimer:true, deadline, locked: now > deadline, minutesLeft: Math.max(0, Math.ceil((deadline-now)/60000)) };
+  const inGrace = now > sessionEnd && now <= deadline;
+  return {
+    hasTimer:true, deadline, sessionEnd, graceMinutes: graceMinutes||0,
+    locked: now > deadline, inGrace,
+    minutesLeft: Math.max(0, Math.ceil((deadline-now)/60000))
+  };
 }
 
 /* ============================================================
    CHECKLIST — estado por hábito+día en localStorage (se resetea
    solo al cambiar la fecha, porque la key incluye el día de hoy).
    ============================================================ */
+const SUPERSCRIPT_DIGITS = {'0':'⁰','1':'¹','2':'²','3':'³','4':'⁴','5':'⁵','6':'⁶','7':'⁷','8':'⁸','9':'⁹'};
+function toSuperscript(n){
+  return String(n).split('').map(d=>SUPERSCRIPT_DIGITS[d]||d).join('');
+}
+
 function checklistKey_(title, dateKey){ return 'habitChecklist_'+title+'__'+dateKey; }
 function getChecklistState(title, dateKey, steps){
   try{
@@ -976,9 +1001,12 @@ function closeTimerModal(){
 function startEmergentTimer(){
   const minutes = Math.max(1, parseInt(document.getElementById('timerMinutesInput').value,10)||5);
   TIMER_STATE.running = true;
-  TIMER_STATE.endsAt = Date.now() + minutes*60000;
+  TIMER_STATE.totalMs = minutes*60000;
+  TIMER_STATE.endsAt = Date.now() + TIMER_STATE.totalMs;
   document.getElementById('timerIdleView').classList.add('hidden');
   document.getElementById('timerRunningView').classList.remove('hidden');
+  const ring = document.getElementById('timerRing');
+  if(ring){ ring.style.transition='none'; ring.setAttribute('stroke-dashoffset','0'); ring.setAttribute('stroke','#58CC02'); void ring.offsetWidth; ring.style.transition=''; }
   tickEmergentTimer();
   TIMER_STATE.intervalId = setInterval(tickEmergentTimer, 500);
 }
@@ -992,6 +1020,8 @@ function tickEmergentTimer(){
   if(msLeft <= 0){
     clearInterval(TIMER_STATE.intervalId);
     TIMER_STATE.running = false;
+    const ring = document.getElementById('timerRing');
+    if(ring) ring.setAttribute('stroke-dashoffset', '326.7');
     document.getElementById('timerRunningView').classList.add('hidden');
     document.getElementById('timerDoneView').classList.remove('hidden');
     playAlertSound();
@@ -1000,6 +1030,16 @@ function tickEmergentTimer(){
   const totalSec = Math.ceil(msLeft/1000);
   const mm = String(Math.floor(totalSec/60)).padStart(2,'0');
   const ss = String(totalSec%60).padStart(2,'0');
+  // Anillo circular que se vacía a medida que avanza el tiempo -- offset
+  // 0 = anillo lleno (recién arrancado), circunferencia completa = vacío.
+  const CIRC = 2*Math.PI*52;
+  const elapsedFraction = TIMER_STATE.totalMs ? Math.min(1, (TIMER_STATE.totalMs-msLeft)/TIMER_STATE.totalMs) : 0;
+  const ring = document.getElementById('timerRing');
+  if(ring){
+    ring.setAttribute('stroke-dashoffset', String(CIRC*elapsedFraction));
+    const remainingFraction = 1-elapsedFraction;
+    ring.setAttribute('stroke', remainingFraction>0.5 ? '#58CC02' : remainingFraction>0.2 ? '#f59e0b' : '#ff4b4b');
+  }
   const disp = document.getElementById('timerCountdownDisplay');
   if(disp) disp.textContent = `${mm}:${ss}`;
 }
@@ -1038,7 +1078,7 @@ function renderHabitSlider(habit){
       <span class="hslider-label" style="left:14px">❎</span>
       <span class="hslider-label" style="right:${timer.locked?'44px':'14px'}">${timer.locked?'🟩':'✅'}</span>
       ${!timer.locked ? `<span class="hslider-label" style="right:56px;opacity:.35;font-size:9px">🟩</span>` : ''}
-      <div class="hslider-thumb" style="left:calc(50% - 26px)">↔</div>
+      <div class="hslider-thumb" style="left:calc(50% - 26px);opacity:0">❎</div>
     </div>`;
 }
 
@@ -1052,12 +1092,18 @@ function habitExtraInfo(habit){
     parts.push(`<div class="mt-2 space-y-1">${checklist.map((step,i)=>{
       const st = getChecklistState(habit.title, todayKey, checklist);
       return `<button onclick="toggleChecklistItem('${habit.title.replace(/'/g,"\\'")}','${todayKey}',${i})" class="w-full text-left flex items-center gap-2 mono text-[11px] px-2 py-1.5 rounded-[8px] ${st[i]?'bg-[#0d2a1a] text-[#58CC02]':'bg-[#0d1117] text-[#7d8590]'}">
-        <span>${st[i]?'☑':'☐'}</span><span class="${st[i]?'line-through opacity-70':''}">${step}</span>
+        <span>${st[i]?'☑':'☐'}</span><span class="opacity-60">${toSuperscript(i+1)}</span><span class="${st[i]?'line-through opacity-70':''}">${step}</span>
       </button>`;
     }).join('')}</div><div class="mono text-[9px] text-[#5d666f] mt-1">${done}/${checklist.length} pasos • sin completarlos todos no hay ✅ Perfecto</div>`);
   }
   if(timer.hasTimer){
-    parts.push(`<div class="mono text-[9px] mt-1 ${timer.locked?'text-[#ff7b72]':'text-[#58CC02]'}">${timer.locked ? '⏱ tiempo de sesión vencido — Perfecto bloqueado hoy' : `⏱ quedan ${timer.minutesLeft} min para Perfecto`}</div>`);
+    if(timer.locked){
+      parts.push(`<div class="mono text-[9px] mt-1 text-[#ff7b72]">⏱ tiempo vencido${timer.graceMinutes?' (con gracia de '+timer.graceMinutes+'min incluida)':''} — Perfecto bloqueado hoy</div>`);
+    } else if(timer.inGrace){
+      parts.push(`<div class="mono text-[9px] mt-1 text-[#f59e0b]">⏳ en gracia — quedan ${timer.minutesLeft} min para el bloqueo</div>`);
+    } else {
+      parts.push(`<div class="mono text-[9px] mt-1 text-[#58CC02]">⏱ quedan ${timer.minutesLeft} min para Perfecto${timer.graceMinutes?' (+ '+timer.graceMinutes+'min de gracia)':''}</div>`);
+    }
   }
   return parts.join('');
 }
@@ -1072,39 +1118,51 @@ function attachSliderHandlers(){
     function geometry(){
       const w = track.offsetWidth, tw = 52;
       const maxOffset = (w - tw)/2 - 6;
+      // restX = posición de descanso = la propia zona ❎. Por diseño, "fail"
+      // es el único estado que no requiere gesto -- el slider YA arranca ahí,
+      // así que un simple toque sin arrastrar alcanza para candidatear ❎
+      // (todavía hay que confirmar motivo en el modal, no se manda solo).
       return { maxOffset, failAt: -0.35*maxOffset, okAt: 0.35*maxOffset, perfectAt: 0.78*maxOffset };
     }
     function setThumb(dx, dragging){
+      thumb.style.opacity = '1';
       thumb.classList.toggle('dragging', !!dragging);
       thumb.style.transform = `translateX(${dx}px)`;
       const g = geometry();
-      let zone='neutral', icon='↔', bg='#21262d', bd='#30363d';
-      if(dx <= g.failAt){ zone='fail'; icon='❎'; bg='#3a1414'; bd='#ff4b4b'; }
-      else if(dx >= g.perfectAt){ zone='perfect'; icon='✅'; bg='#0d2a1a'; bd='#58CC02'; }
+      let zone='fail', icon='❎', bg='#3a1414', bd='#ff4b4b';
+      if(dx >= g.perfectAt){ zone='perfect'; icon='✅'; bg='#0d2a1a'; bd='#58CC02'; }
       else if(dx >= g.okAt){ zone='ok'; icon='🟩'; bg='#1e2a15'; bd='#a3e635'; }
+      else if(dx > g.failAt){ zone='neutral'; icon='↔'; bg='#21262d'; bd='#30363d'; }
       thumb.textContent = icon;
       thumb.style.background = bg; thumb.style.borderColor = bd;
       return zone;
     }
 
-    let startX=0, curDx=0, lastZone='neutral', pointerId=null;
+    // Posición inicial: en reposo, exactamente en la zona ❎.
+    const g0 = geometry();
+    setThumb(g0.failAt, false);
+
+    let startX=0, curDx=g0.failAt, lastZone='fail', pointerId=null;
 
     track.addEventListener('pointerdown', (e)=>{
       pointerId = e.pointerId;
       try{ track.setPointerCapture(pointerId); }catch(e){ /* navegador raro sin soporte -- seguimos igual */ }
-      startX = e.clientX; curDx = 0; lastZone='neutral';
-      setThumb(0, true);
+      const g = geometry();
+      startX = e.clientX; curDx = g.failAt; lastZone='fail';
+      setThumb(g.failAt, true);
     });
     track.addEventListener('pointermove', (e)=>{
       if(e.pointerId !== pointerId) return;
       const g = geometry();
-      let dx = e.clientX - startX;
+      let dx = g.failAt + (e.clientX - startX);
       const locked = track.dataset.locked === '1';
       // Bloqueo FÍSICO: si venció el timer, el tope derecho se recorta
       // antes de la zona "perfecto" -- por más que el dedo siga, el
       // thumb no la alcanza (no es solo un botón gris, no llega el gesto).
-      const rightCap = locked ? (g.okAt + (g.perfectAt-g.okAt)*0.4) : g.maxOffset;
-      dx = Math.max(-g.maxOffset, Math.min(rightCap, dx));
+      const rightCap = locked ? (g.okAt + (g.perfectAt-g.okAt)*0.4) : g.perfectAt + 6;
+      // El límite izquierdo es la propia posición de descanso -- no hay
+      // "más fail que fail", así que no puede irse más allá.
+      dx = Math.max(g.failAt, Math.min(rightCap, dx));
       curDx = dx;
       const zone = setThumb(dx, true);
       if(zone !== lastZone){ hapticPulse(18); lastZone = zone; }
@@ -1119,6 +1177,8 @@ function attachSliderHandlers(){
       if(curDx <= g.failAt) estado = '❎';
       else if(curDx >= g.perfectAt) estado = '✅';
       else if(curDx >= g.okAt) estado = '🟩';
+      // Soltar en la zona neutral (entre fail y ok, sin llegar a ninguna)
+      // no dispara nada -- el thumb simplemente vuelve a descansar en ❎.
 
       if(estado === '✅' && !checklistOk){
         showToast('⚠️ Completá el checklist antes de marcar Perfecto');
@@ -1130,15 +1190,15 @@ function attachSliderHandlers(){
         thumb.style.transition = 'transform .18s ease';
         setTimeout(()=>{
           thumb.style.transition = '';
-          setThumb(0, false);
+          setThumb(g.failAt, false);
           openModal(title, estado);
         }, 180);
       } else {
         thumb.style.transition = 'transform .18s ease';
-        setThumb(0, false);
+        setThumb(g.failAt, false);
         setTimeout(()=>{ thumb.style.transition=''; }, 180);
       }
-      curDx = 0; lastZone = 'neutral';
+      curDx = g.failAt; lastZone = 'fail';
     }
     track.addEventListener('pointerup', endDrag);
     track.addEventListener('pointercancel', endDrag);
