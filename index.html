@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="es"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"><title>Habits</title>
 <link rel="manifest" href="./manifest.json">
@@ -21,10 +22,17 @@
 @keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-4px)}75%{transform:translateX(4px)}}
 @keyframes confetti{0%{transform:translateY(0) rotate(0) scale(0);opacity:1}100%{transform:translateY(-80px) rotate(720deg) scale(1);opacity:0}}
 @keyframes modeSwitch{0%{transform:scale(.9);opacity:.4}100%{transform:scale(1);opacity:1}}
+@keyframes pulseRing{0%{box-shadow:0 0 0 0 rgba(255,75,75,.55)}100%{box-shadow:0 0 0 16px rgba(255,75,75,0)}}
+@keyframes popIn{0%{transform:scale(.7);opacity:0}100%{transform:scale(1);opacity:1}}
 body{background:#0d1117;color:#e6edf3}
 .icon-nav{stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .scrollbar-thin::-webkit-scrollbar{height:6px} .scrollbar-thin::-webkit-scrollbar-thumb{background:#30363d;border-radius:4px}
 textarea{font-family:'JetBrains Mono',monospace}
+.hslider-track{position:relative;height:64px;border-radius:20px;background:#0d1117;border:1px solid #21262d;overflow:hidden;touch-action:pan-y;user-select:none}
+.hslider-zone{position:absolute;top:0;bottom:0;pointer-events:none;transition:opacity .15s}
+.hslider-thumb{position:absolute;top:6px;bottom:6px;width:52px;border-radius:16px;display:flex;align-items:center;justify-content:center;font-size:22px;background:#21262d;border:1px solid #30363d;transition:background .12s,border-color .12s;will-change:transform}
+.hslider-thumb.dragging{transition:none}
+.hslider-label{position:absolute;top:0;bottom:0;display:flex;align-items:center;font-size:11px;font-family:'JetBrains Mono',monospace;pointer-events:none;opacity:.55}
 </style></head><body class="pb-[90px]">
 <div id="app" class="max-w-[720px] mx-auto"></div>
 <div id="toast" class="fixed bottom-[100px] left-1/2 -translate-x-1/2 bg-white text-black px-5 py-2 rounded-full font-bold hidden z-[99] mono text-[13px] text-center max-w-[90%]"></div>
@@ -35,6 +43,40 @@ textarea{font-family:'JetBrains Mono',monospace}
     <div class="flex gap-2 mt-4"><button onclick="closeModal()" class="flex-1 py-3 rounded-full bg-[#21262d] mono text-[12px]">Cancelar</button><button id="modalSave" class="flex-1 py-3 rounded-full bg-white text-black mono text-[12px] font-bold">Guardar</button></div>
   </div>
 </div>
+
+<!-- Timer emergente (⏱ popup): countdown manual, con sonido + opción de
+     sonido propio vía el picker nativo del sistema ("abrir con..."). -->
+<button id="timerFab" onclick="openTimerModal()" class="fixed right-4 bottom-[110px] z-[90] w-14 h-14 rounded-full bg-[#161b22] border border-[#21262d] shadow-lg flex items-center justify-center text-[22px]">⏱</button>
+<div id="timerModal" class="fixed inset-0 bg-black/70 backdrop-blur-sm hidden z-[101] flex items-center justify-center p-4">
+  <div class="bg-[#161b22] border border-[#30363d] rounded-[20px] p-5 w-full max-w-[360px] text-center">
+    <h3 class="font-bold serif italic text-[18px]">Timer emergente</h3>
+    <div id="timerIdleView">
+      <p class="mono text-[11px] text-[#7d8590] mt-1">Contador independiente, con alerta sonora al llegar a cero.</p>
+      <input id="timerMinutesInput" type="number" min="1" max="180" value="5" class="mt-4 w-full bg-[#0d1117] border border-[#21262d] rounded-[12px] p-3 mono text-[20px] text-center outline-none focus:border-[#58CC02]">
+      <div class="mono text-[10px] text-[#5d666f] mt-1">minutos</div>
+      <label class="mt-4 flex items-center justify-between gap-2 bg-[#0d1117] border border-[#21262d] rounded-[12px] p-3 cursor-pointer">
+        <span class="mono text-[11px] text-[#7d8590]" id="timerSoundLabel">🔊 Sonido por defecto</span>
+        <span class="mono text-[10px] font-bold bg-[#21262d] px-2 py-1 rounded-full">Elegir…</span>
+        <input id="timerSoundPicker" type="file" accept="audio/*" class="hidden">
+      </label>
+      <div class="flex gap-2 mt-4">
+        <button onclick="closeTimerModal()" class="flex-1 py-3 rounded-full bg-[#21262d] mono text-[12px]">Cerrar</button>
+        <button onclick="startEmergentTimer()" class="flex-1 py-3 rounded-full bg-white text-black mono text-[12px] font-bold">Iniciar</button>
+      </div>
+    </div>
+    <div id="timerRunningView" class="hidden">
+      <div id="timerCountdownDisplay" class="text-[56px] font-[800] tracking-tighter mt-2 mono">05:00</div>
+      <div class="mono text-[10px] text-[#5d666f]">⏱ corriendo…</div>
+      <button onclick="cancelEmergentTimer()" class="w-full mt-6 py-3 rounded-full bg-[#21262d] mono text-[12px]">Cancelar</button>
+    </div>
+    <div id="timerDoneView" class="hidden">
+      <div class="text-[56px] mt-2 animate-[popIn_.3s_ease]">⏰</div>
+      <div class="font-bold mt-1">¡Tiempo!</div>
+      <button onclick="closeTimerModal()" class="w-full mt-6 py-3 rounded-full bg-white text-black mono text-[12px] font-bold">Listo</button>
+    </div>
+  </div>
+</div>
+
 
 <script>
 /* ============================================================
@@ -72,6 +114,115 @@ function colorFor(title){
   const fromCalendar = habit && habit.colorId && palette && palette[habit.colorId] && palette[habit.colorId].background;
   HABIT_COLORS[title] = fromCalendar || PALETTE[Object.keys(HABIT_COLORS).length % PALETTE.length];
   return HABIT_COLORS[title];
+}
+
+/* ============================================================
+   COMANDOS EN UBICACIÓN — parser de ⏱ (timer de sesión) y
+   checklist (rutinas compuestas). Sintaxis, todo opcional:
+     ⏱30          -> sesión de 30min, ancla = inicio real del evento de HOY
+     - Paso 1      -> ítem de checklist
+     - Paso 2      -> ítem de checklist
+   ============================================================ */
+function parseLocationCommands(locationText){
+  const lines = (locationText||'').split('\n').map(l=>l.trim()).filter(Boolean);
+  let timerMinutes = null;
+  const checklist = [];
+  lines.forEach(line=>{
+    const timerMatch = line.match(/^⏱\s*(\d+)/);
+    if(timerMatch){ timerMinutes = parseInt(timerMatch[1],10); return; }
+    const stepMatch = line.match(/^-\s*(.+)/);
+    if(stepMatch){ checklist.push(stepMatch[1].trim()); }
+  });
+  return { timerMinutes, checklist };
+}
+
+// Estado del timer de sesión de un hábito -- el ancla (todayStartTime) viene
+// del backend, tomada directo de la ocurrencia real de HOY en Calendar, así
+// que no se puede evadir escribiendo cualquier cosa en el cliente. OJO: el
+// bloqueo en sí (deshabilitar "Perfecto") es solo client-side por decisión
+// explícita -- alguien pegándole directo al endpoint puede seguir mandando
+// ✅ tarde. Ver nota en el resumen de la conversación.
+function getHabitTimerState(habit){
+  const { timerMinutes } = parseLocationCommands(habit.location);
+  if(!timerMinutes || !habit.todayStartTime) return { hasTimer:false, locked:false };
+  const deadline = new Date(habit.todayStartTime).getTime() + timerMinutes*60000;
+  const now = Date.now();
+  return { hasTimer:true, deadline, locked: now > deadline, minutesLeft: Math.max(0, Math.ceil((deadline-now)/60000)) };
+}
+
+/* ============================================================
+   CHECKLIST — estado por hábito+día en localStorage (se resetea
+   solo al cambiar la fecha, porque la key incluye el día de hoy).
+   ============================================================ */
+function checklistKey_(title, dateKey){ return 'habitChecklist_'+title+'__'+dateKey; }
+function getChecklistState(title, dateKey, steps){
+  try{
+    const saved = JSON.parse(localStorage.getItem(checklistKey_(title,dateKey))||'[]');
+    return steps.map((s,i)=>!!saved[i]);
+  }catch(e){ return steps.map(()=>false); }
+}
+function toggleChecklistItem(title, dateKey, idx){
+  const habit = STATE.data.habits.find(h=>h.title===title);
+  if(!habit) return;
+  const { checklist } = parseLocationCommands(habit.location);
+  const state = getChecklistState(title,dateKey,checklist);
+  state[idx] = !state[idx];
+  try{ localStorage.setItem(checklistKey_(title,dateKey), JSON.stringify(state)); }catch(e){}
+  renderTab();
+}
+function checklistComplete(title, dateKey, steps){
+  if(!steps.length) return true;
+  return getChecklistState(title,dateKey,steps).every(Boolean);
+}
+
+/* ============================================================
+   HAPTICS — navigator.vibrate no existe en Safari/iOS (ni en
+   navegador ni instalada como PWA). Se llama siempre detrás de un
+   feature-check ('vibrate' in navigator), así que en esos casos
+   la llamada simplemente no hace nada -- no rompe ni afecta ningún
+   otro comportamiento de la app, es un no-op puro y aislado.
+   ============================================================ */
+function hapticPulse(pattern){
+  if('vibrate' in navigator){
+    try{ navigator.vibrate(pattern); }catch(e){ /* no-op */ }
+  }
+}
+
+/* ============================================================
+   EXPORT JSON — pensado para pegarle a una IA sin releer meses
+   de texto crudo. Todo sale de datos que ya están en memoria,
+   no pega al servidor.
+   ============================================================ */
+function buildExportPayload(){
+  const data=getEffectiveData();
+  const byDate=getByDateMap(data.allLogs);
+  const streak=computeStreakClient(data.allLogs, data.streakState.mode, data.streakState);
+  return {
+    generadoEn: new Date().toISOString(),
+    calendario: data.calendarName,
+    racha_actual: streak,
+    modo: data.streakState.mode,
+    freezes_disponibles: data.streakState.freezesAvailable,
+    reparacion_hardcore: data.streakState.repair || null,
+    habitos: data.habits.map(h=>({
+      titulo: h.title,
+      capital: h.capital,
+      ultimo_estado: h.lastLog ? { fecha:h.lastLog.key, estado:h.lastLog.estado, motivo:h.lastLog.motivo } : null,
+      historial_reciente: h.logs.slice(-30).map(l=>({fecha:l.key, estado:l.estado, motivo:l.motivo})),
+      cumplimiento_pct: h.logs.length ? Math.round(h.logs.filter(l=>l.estado!=='❎').length / h.logs.length * 100) : null
+    })),
+    total_dias_con_registro: Object.keys(byDate).length
+  };
+}
+function exportLogbookJSON(){
+  const payload = buildExportPayload();
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `bitacora_${fmtKey(new Date())}.json`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 2000);
+  showToast('📄 JSON exportado');
 }
 
 /* ============================================================
@@ -142,7 +293,7 @@ function buildLogLine(estado, motivoRaw){
   motivo=motivo.charAt(0).toUpperCase()+motivo.slice(1);
   const raw=`${dayEmoji}${key}${estado}#${motivo}`;
   const score= estado==='✅'?1: estado==='🟩'?0.5:-1;
-  return {key, estado, motivo, raw, score};
+  return {key, estado, motivo, raw, score, dayEmoji};
 }
 
 function enqueueLog(title, estado, motivoRaw){
@@ -296,7 +447,7 @@ function render(){
         ? 'Un fallo rompe la racha. Se repara con 3 días perfectos (cualquier hábito) en 72h.'
         : 'Un fallo al día se cubre con freeze si tienes uno activo. Ganas 1 freeze cada 7 días de racha, tope 2.'}
       ${!isHardcore ? ` • ${'❄'.repeat(streakState.freezesAvailable||0)} ${streakState.freezesAvailable||0}/2 freeze` : ''}
-      ${isHardcore && streakState.repair ? ` • ⏳ Reparando: ${streakState.repair.perfectsDone.length}/3 perfectos` : ''}
+      ${isHardcore && streakState.repair ? ` • ⏳ Reparando: ${streakState.repair.perfectsDone.length}/3 perfectos` : ''}<span id="hardcoreCountdown" class="text-[#ff4b4b] font-bold"></span>
     </div>
   </div>
 
@@ -314,6 +465,26 @@ function render(){
   `;
 
   renderTab();
+  if(_hardcoreCountdownInterval) clearInterval(_hardcoreCountdownInterval);
+  updateHardcoreCountdown();
+  _hardcoreCountdownInterval = setInterval(updateHardcoreCountdown, 1000);
+}
+
+// Countdown de "modo hardcore" -- por decisión explícita, solo se muestra
+// en la ventana real de peligro (últimas 24h de las 72h de reparación),
+// no durante toda la ventana. Actualiza el span directo (sin re-render
+// completo) para no interrumpir lo que se esté tocando en pantalla.
+let _hardcoreCountdownInterval = null;
+function updateHardcoreCountdown(){
+  const el = document.getElementById('hardcoreCountdown');
+  if(!el){ clearInterval(_hardcoreCountdownInterval); _hardcoreCountdownInterval=null; return; }
+  const repair = STATE.data && STATE.data.streakState && STATE.data.streakState.repair;
+  if(!repair){ el.textContent=''; return; }
+  const msLeft = new Date(repair.deadlineISO).getTime() - Date.now();
+  if(msLeft <= 0){ el.textContent=' • ⏰ ventana de reparación vencida'; return; }
+  if(msLeft > 24*60*60*1000){ el.textContent=''; return; } // fuera de la ventana de peligro todavía
+  const h=Math.floor(msLeft/3600000), m=Math.floor((msLeft%3600000)/60000), s=Math.floor((msLeft%60000)/1000);
+  el.textContent = ` • 🔥 ÚLTIMO DÍA ${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
 }
 
 function switchMode(mode){
@@ -366,9 +537,10 @@ function renderTab(){
       <div class="mt-4 rounded-[20px] bg-[#0d1117] border border-[#21262d] p-4">
         <h4 class="mono text-[11px] font-bold mb-3">INPUT RÁPIDO HOY ${data.today.emoji}${data.today.key}</h4>
         ${data.habits.map(h=>`
-          <div class="flex justify-between items-center gap-2 py-2 border-b border-[#21262d]/50 last:border-0">
-            <div class="flex items-center gap-2 flex-1 min-w-0"><div class="w-2 h-2 rounded-full flex-shrink-0" style="background:${colorFor(h.title)}"></div><div class="min-w-0"><div class="font-semibold text-[14px] truncate">${h.title}</div><div class="mono text-[10px] text-[#5d666f] truncate">${h.lastLog?.raw||'sin log'}</div></div></div>
-            <div class="flex gap-1 flex-shrink-0"><button onclick="openModal('${h.title.replace(/'/g,"\\'")}','✅')" class="w-10 h-10 rounded-full bg-[#1a2e1a] border border-[#58CC02]/30">✅</button><button onclick="openModal('${h.title.replace(/'/g,"\\'")}','🟩')" class="w-10 h-10 rounded-full bg-[#1e2a15] border border-[#21262d]">🟩</button><button onclick="openModal('${h.title.replace(/'/g,"\\'")}','❎')" class="w-10 h-10 rounded-full bg-[#2a1515] border border-[#21262d]">❎</button></div>
+          <div class="py-3 border-b border-[#21262d]/50 last:border-0">
+            <div class="flex items-center gap-2 mb-2"><div class="w-2 h-2 rounded-full flex-shrink-0" style="background:${colorFor(h.title)}"></div><div class="min-w-0"><div class="font-semibold text-[14px] truncate">${h.title}</div><div class="mono text-[10px] text-[#5d666f] truncate">${h.lastLog?.raw||'sin log'}</div></div></div>
+            ${renderHabitSlider(h)}
+            ${habitExtraInfo(h)}
           </div>
         `).join('')}
       </div>
@@ -378,6 +550,7 @@ function renderTab(){
   if(STATE.tab===1) renderCalendarTab(el);
   if(STATE.tab===2){ renderAnalysisTab(el); setTimeout(drawChart,80); }
   if(STATE.tab===3) renderLogTab(el);
+  attachSliderHandlers();
 }
 
 /* ================= PESTAÑA 2: Calendario navegable + heatmap ================= */
@@ -526,6 +699,31 @@ function renderAnalysisTab(el){
         <div id="rawTableWrap" class="overflow-x-auto scrollbar-thin -mx-4 px-4"></div>
       </div>
 
+      <div class="rounded-[20px] bg-[#161b22] border border-[#21262d] p-4">
+        <h4 class="mono text-[11px] font-bold tracking-widest mb-3">RENDIMIENTO POR DÍA DE SEMANA</h4>
+        ${(()=>{
+          const order = [1,2,3,4,5,6,0]; // Lun..Dom, usando índices de DAY (0=Dom)
+          return order.map(dowIdx=>{
+            const emoji = DAY[dowIdx];
+            const logsDia = data.allLogs.filter(l => (l.dayEmoji||DAY[keyToDate(l.key).getDay()]) === emoji);
+            const total = logsDia.length;
+            const okCount = logsDia.filter(l=>l.estado!=='❎').length;
+            const pct = total ? Math.round(okCount/total*100) : 0;
+            const barColor = total===0 ? '#21262d' : pct>=75 ? '#58CC02' : pct>=40 ? '#a3e635' : '#ff4b4b';
+            return `<div class="flex items-center gap-3 mb-2">
+              <div class="mono text-[11px] w-6 flex-shrink-0">${emoji}</div>
+              <div class="flex-1 h-[10px] rounded-full bg-[#0d1117] overflow-hidden"><div class="h-full rounded-full" style="width:${total?pct:0}%;background:${barColor}"></div></div>
+              <div class="mono text-[10px] text-[#7d8590] w-16 text-right flex-shrink-0">${total ? pct+'% ('+total+')' : 'sin datos'}</div>
+            </div>`;
+          }).join('');
+        })()}
+        <p class="mono text-[9px] text-[#5d666f] mt-2">Agrupado por la letra decorativa de cada línea del LOG — % de días no-❎ sobre el total de registros de ese día de semana.</p>
+      </div>
+
+      <button onclick="exportLogbookJSON()" class="w-full rounded-[16px] bg-[#161b22] border border-[#21262d] p-4 flex items-center justify-center gap-2 mono text-[12px] font-bold">
+        📄 Exportar bitácora completa (JSON)
+      </button>
+
       <div class="grid grid-cols-2 gap-3">
         <div class="rounded-[16px] bg-[#161b22] border border-[#21262d] p-4"><div class="mono text-[10px] text-[#5d666f]">CUMPLIMIENTO</div><div class="text-[22px] font-bold">${(()=>{ const ok=data.allLogs.filter(l=>l.estado!=='❎').length; const total=data.allLogs.length; return total?Math.round(ok/total*100):0; })()}%</div><div class="mono text-[10px]">${data.allLogs.filter(l=>l.estado!=='❎').length}/${data.allLogs.length}</div></div>
         <div class="rounded-[16px] bg-[#161b22] border border-[#21262d] p-4"><div class="mono text-[10px] text-[#5d666f]">TOP MOTIVO ❎</div><div class="text-[13px] font-bold truncate">${(()=>{ const m={}; data.allLogs.forEach(l=>{ if(l.estado==='❎' && l.motivo) m[l.motivo]=(m[l.motivo]||0)+1; }); const top=Object.entries(m).sort((a,b)=>b[1]-a[1])[0]; return top? '#'+top[0]+' x'+top[1] : 'Sin datos'; })()}</div></div>
@@ -639,7 +837,7 @@ function renderLogTab(el){
             ).join('') || 'sin logs'}
           </div>
           <div id="rawView_${idx}"></div>
-          <div class="flex gap-2 mt-3"><button onclick="openModal('${h.title.replace(/'/g,"\\'")}','✅')" class="flex-1 py-2 rounded-full bg-[#1a2e1a] border border-[#58CC02]/30">✅ Perfecto</button><button onclick="openModal('${h.title.replace(/'/g,"\\'")}','🟩')" class="flex-1 py-2 rounded-full bg-[#1e2a15] border border-[#21262d]">🟩 Ok</button><button onclick="openModal('${h.title.replace(/'/g,"\\'")}','❎')" class="flex-1 py-2 rounded-full bg-[#2a1515] border border-[#21262d]">❎ Fail</button></div>
+          <div class="mt-3">${renderHabitSlider(h)}${habitExtraInfo(h)}</div>
         </div>
       `).join('')}
     </div>
@@ -731,11 +929,228 @@ function renderRawViewBlock(title){
   `;
 }
 
+/* ============================================================
+   TIMER EMERGENTE (popup ⏱) — independiente del timer de sesión
+   por hábito. Sonido por defecto sintetizado (siempre funciona,
+   sin depender de ningún archivo externo); opcional: elegir un
+   audio propio del dispositivo vía el picker nativo del sistema
+   (<input type=file>, la única forma real de "abrir con..." que
+   permite la web -- no hay acceso a filesystem persistente).
+   ============================================================ */
+let TIMER_STATE = { running:false, endsAt:0, intervalId:null, customAudioUrl:null };
+
+function playDefaultBeep(){
+  try{
+    const ctx = new (window.AudioContext||window.webkitAudioContext)();
+    [0,1,2].forEach(i=>{
+      const osc = ctx.createOscillator(); const gain = ctx.createGain();
+      osc.type='sine'; osc.frequency.value=880;
+      osc.connect(gain); gain.connect(ctx.destination);
+      const t = ctx.currentTime + i*0.35;
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(0.4, t+0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t+0.28);
+      osc.start(t); osc.stop(t+0.3);
+    });
+  }catch(e){ /* AudioContext no disponible -- se pierde el sonido, no rompe nada más */ }
+}
+function playAlertSound(){
+  if(TIMER_STATE.customAudioUrl){
+    const audio = new Audio(TIMER_STATE.customAudioUrl);
+    audio.play().catch(()=>playDefaultBeep());
+  } else {
+    playDefaultBeep();
+  }
+  hapticPulse([120,60,120,60,200]);
+}
+
+function openTimerModal(){
+  document.getElementById('timerModal').classList.remove('hidden');
+  document.getElementById('timerIdleView').classList.remove('hidden');
+  document.getElementById('timerRunningView').classList.add('hidden');
+  document.getElementById('timerDoneView').classList.add('hidden');
+}
+function closeTimerModal(){
+  document.getElementById('timerModal').classList.add('hidden');
+}
+function startEmergentTimer(){
+  const minutes = Math.max(1, parseInt(document.getElementById('timerMinutesInput').value,10)||5);
+  TIMER_STATE.running = true;
+  TIMER_STATE.endsAt = Date.now() + minutes*60000;
+  document.getElementById('timerIdleView').classList.add('hidden');
+  document.getElementById('timerRunningView').classList.remove('hidden');
+  tickEmergentTimer();
+  TIMER_STATE.intervalId = setInterval(tickEmergentTimer, 500);
+}
+function cancelEmergentTimer(){
+  clearInterval(TIMER_STATE.intervalId);
+  TIMER_STATE.running = false;
+  closeTimerModal();
+}
+function tickEmergentTimer(){
+  const msLeft = TIMER_STATE.endsAt - Date.now();
+  if(msLeft <= 0){
+    clearInterval(TIMER_STATE.intervalId);
+    TIMER_STATE.running = false;
+    document.getElementById('timerRunningView').classList.add('hidden');
+    document.getElementById('timerDoneView').classList.remove('hidden');
+    playAlertSound();
+    return;
+  }
+  const totalSec = Math.ceil(msLeft/1000);
+  const mm = String(Math.floor(totalSec/60)).padStart(2,'0');
+  const ss = String(totalSec%60).padStart(2,'0');
+  const disp = document.getElementById('timerCountdownDisplay');
+  if(disp) disp.textContent = `${mm}:${ss}`;
+}
+document.addEventListener('DOMContentLoaded', ()=>{
+  const picker = document.getElementById('timerSoundPicker');
+  if(picker){
+    picker.addEventListener('change', ()=>{
+      const file = picker.files && picker.files[0];
+      if(!file) return;
+      TIMER_STATE.customAudioUrl = URL.createObjectURL(file);
+      const label = document.getElementById('timerSoundLabel');
+      if(label) label.textContent = '🔊 ' + file.name.slice(0,22);
+    });
+  }
+});
+
+/* ============================================================
+   SLIDER HÁPTICO DE 3 NIVELES — reemplaza los 3 botones ❎/🟩/✅.
+   Arranca en cero (centro). Arrastrar a la derecha pasa por 🟩 y
+   llega a ✅; a la izquierda, ❎. Si el timer de sesión venció, el
+   tope derecho se recorta ANTES de la zona ✅ -- el thumb no llega
+   ahí ni aunque el dedo siga moviéndose (bloqueo físico, no solo
+   visual). Al soltar en una zona válida: pulso háptico + animación
+   de pop, y recién ahí se abre el campo de contexto (motivo ahora
+   obligatorio siempre, ver modalSave).
+   ============================================================ */
+function renderHabitSlider(habit){
+  const timer = getHabitTimerState(habit);
+  const { checklist } = parseLocationCommands(habit.location);
+  const todayKey = STATE.data.today.key;
+  const checklistOk = checklistComplete(habit.title, todayKey, checklist);
+  return `
+    <div class="hslider-track" data-title="${habit.title.replace(/"/g,'&quot;')}" data-locked="${timer.locked?1:0}" data-checklist-ok="${checklistOk?1:0}">
+      <div class="hslider-zone" style="left:0;width:33%;background:linear-gradient(90deg,#ff4b4b33,transparent)"></div>
+      <div class="hslider-zone" style="right:0;width:33%;background:linear-gradient(270deg,${timer.locked?'#58CC0210':'#58CC0233'},transparent)"></div>
+      <span class="hslider-label" style="left:14px">❎</span>
+      <span class="hslider-label" style="right:${timer.locked?'44px':'14px'}">${timer.locked?'🟩':'✅'}</span>
+      ${!timer.locked ? `<span class="hslider-label" style="right:56px;opacity:.35;font-size:9px">🟩</span>` : ''}
+      <div class="hslider-thumb" style="left:calc(50% - 26px)">↔</div>
+    </div>`;
+}
+
+function habitExtraInfo(habit){
+  const timer = getHabitTimerState(habit);
+  const { checklist } = parseLocationCommands(habit.location);
+  const todayKey = STATE.data.today.key;
+  const parts = [];
+  if(checklist.length){
+    const done = getChecklistState(habit.title, todayKey, checklist).filter(Boolean).length;
+    parts.push(`<div class="mt-2 space-y-1">${checklist.map((step,i)=>{
+      const st = getChecklistState(habit.title, todayKey, checklist);
+      return `<button onclick="toggleChecklistItem('${habit.title.replace(/'/g,"\\'")}','${todayKey}',${i})" class="w-full text-left flex items-center gap-2 mono text-[11px] px-2 py-1.5 rounded-[8px] ${st[i]?'bg-[#0d2a1a] text-[#58CC02]':'bg-[#0d1117] text-[#7d8590]'}">
+        <span>${st[i]?'☑':'☐'}</span><span class="${st[i]?'line-through opacity-70':''}">${step}</span>
+      </button>`;
+    }).join('')}</div><div class="mono text-[9px] text-[#5d666f] mt-1">${done}/${checklist.length} pasos • sin completarlos todos no hay ✅ Perfecto</div>`);
+  }
+  if(timer.hasTimer){
+    parts.push(`<div class="mono text-[9px] mt-1 ${timer.locked?'text-[#ff7b72]':'text-[#58CC02]'}">${timer.locked ? '⏱ tiempo de sesión vencido — Perfecto bloqueado hoy' : `⏱ quedan ${timer.minutesLeft} min para Perfecto`}</div>`);
+  }
+  return parts.join('');
+}
+
+let _sliderDrag = null;
+function attachSliderHandlers(){
+  document.querySelectorAll('.hslider-track').forEach(track=>{
+    if(track.dataset.bound) return;
+    track.dataset.bound = '1';
+    const thumb = track.querySelector('.hslider-thumb');
+
+    function geometry(){
+      const w = track.offsetWidth, tw = 52;
+      const maxOffset = (w - tw)/2 - 6;
+      return { maxOffset, failAt: -0.35*maxOffset, okAt: 0.35*maxOffset, perfectAt: 0.78*maxOffset };
+    }
+    function setThumb(dx, dragging){
+      thumb.classList.toggle('dragging', !!dragging);
+      thumb.style.transform = `translateX(${dx}px)`;
+      const g = geometry();
+      let zone='neutral', icon='↔', bg='#21262d', bd='#30363d';
+      if(dx <= g.failAt){ zone='fail'; icon='❎'; bg='#3a1414'; bd='#ff4b4b'; }
+      else if(dx >= g.perfectAt){ zone='perfect'; icon='✅'; bg='#0d2a1a'; bd='#58CC02'; }
+      else if(dx >= g.okAt){ zone='ok'; icon='🟩'; bg='#1e2a15'; bd='#a3e635'; }
+      thumb.textContent = icon;
+      thumb.style.background = bg; thumb.style.borderColor = bd;
+      return zone;
+    }
+
+    let startX=0, curDx=0, lastZone='neutral', pointerId=null;
+
+    track.addEventListener('pointerdown', (e)=>{
+      pointerId = e.pointerId;
+      try{ track.setPointerCapture(pointerId); }catch(e){ /* navegador raro sin soporte -- seguimos igual */ }
+      startX = e.clientX; curDx = 0; lastZone='neutral';
+      setThumb(0, true);
+    });
+    track.addEventListener('pointermove', (e)=>{
+      if(e.pointerId !== pointerId) return;
+      const g = geometry();
+      let dx = e.clientX - startX;
+      const locked = track.dataset.locked === '1';
+      // Bloqueo FÍSICO: si venció el timer, el tope derecho se recorta
+      // antes de la zona "perfecto" -- por más que el dedo siga, el
+      // thumb no la alcanza (no es solo un botón gris, no llega el gesto).
+      const rightCap = locked ? (g.okAt + (g.perfectAt-g.okAt)*0.4) : g.maxOffset;
+      dx = Math.max(-g.maxOffset, Math.min(rightCap, dx));
+      curDx = dx;
+      const zone = setThumb(dx, true);
+      if(zone !== lastZone){ hapticPulse(18); lastZone = zone; }
+    });
+    function endDrag(e){
+      if(e.pointerId !== pointerId) return;
+      pointerId = null;
+      const g = geometry();
+      const title = track.dataset.title;
+      const checklistOk = track.dataset.checklistOk === '1';
+      let estado = null;
+      if(curDx <= g.failAt) estado = '❎';
+      else if(curDx >= g.perfectAt) estado = '✅';
+      else if(curDx >= g.okAt) estado = '🟩';
+
+      if(estado === '✅' && !checklistOk){
+        showToast('⚠️ Completá el checklist antes de marcar Perfecto');
+        estado = null;
+      }
+
+      if(estado){
+        hapticPulse(estado==='✅' ? [30,40,80] : 25);
+        thumb.style.transition = 'transform .18s ease';
+        setTimeout(()=>{
+          thumb.style.transition = '';
+          setThumb(0, false);
+          openModal(title, estado);
+        }, 180);
+      } else {
+        thumb.style.transition = 'transform .18s ease';
+        setThumb(0, false);
+        setTimeout(()=>{ thumb.style.transition=''; }, 180);
+      }
+      curDx = 0; lastZone = 'neutral';
+    }
+    track.addEventListener('pointerup', endDrag);
+    track.addEventListener('pointercancel', endDrag);
+  });
+}
+
+
 /* ================= Modal ================= */
 function openModal(title, estado){
   STATE.pendingLog={title, estado};
   document.getElementById('modalTitle').textContent=title+' '+estado;
-  document.getElementById('modalHint').textContent = estado==='❎' ? 'Motivo obligatorio ej: CenaTarde' : 'Contexto opcional — ¿qué hizo que saliera bien?';
+  document.getElementById('modalHint').textContent = 'Motivo obligatorio ej: CenaTarde';
   document.getElementById('modalInput').value='';
   document.getElementById('modal').classList.remove('hidden');
   document.getElementById('modalInput').focus();
@@ -744,7 +1159,7 @@ function closeModal(){ document.getElementById('modal').classList.add('hidden');
 document.getElementById('modalSave').onclick=()=>{
   const motivo=document.getElementById('modalInput').value.trim();
   const {title, estado}=STATE.pendingLog;
-  if(estado==='❎' && !motivo){ alert('Motivo obligatorio en fallos, ej: CenaTarde'); return; }
+  if(!motivo){ alert('Motivo obligatorio, ej: CenaTarde'); return; }
   closeModal();
 
   enqueueLog(title, estado, motivo);
