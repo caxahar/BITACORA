@@ -28,11 +28,11 @@ body{background:#0d1117;color:#e6edf3}
 .icon-nav{stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .scrollbar-thin::-webkit-scrollbar{height:6px} .scrollbar-thin::-webkit-scrollbar-thumb{background:#30363d;border-radius:4px}
 textarea{font-family:'JetBrains Mono',monospace}
-.hslider-track{position:relative;height:64px;border-radius:20px;background:#0d1117;border:1px solid #21262d;overflow:hidden;touch-action:pan-y;user-select:none}
+.hslider-track{position:relative;height:44px;border-radius:14px;background:#0d1117;border:1px solid #21262d;overflow:hidden;touch-action:pan-y;user-select:none}
 .hslider-zone{position:absolute;top:0;bottom:0;pointer-events:none;transition:opacity .15s}
-.hslider-thumb{position:absolute;top:6px;bottom:6px;width:52px;border-radius:16px;display:flex;align-items:center;justify-content:center;font-size:22px;background:#21262d;border:1px solid #30363d;transition:background .12s,border-color .12s;will-change:transform}
+.hslider-thumb{position:absolute;top:4px;bottom:4px;width:40px;border-radius:11px;display:flex;align-items:center;justify-content:center;font-size:17px;background:#21262d;border:1px solid #30363d;transition:background .12s,border-color .12s;will-change:transform}
 .hslider-thumb.dragging{transition:none}
-.hslider-label{position:absolute;top:0;bottom:0;display:flex;align-items:center;font-size:11px;font-family:'JetBrains Mono',monospace;pointer-events:none;opacity:.55}
+.hslider-label{position:absolute;top:0;bottom:0;display:flex;align-items:center;font-size:10px;font-family:'JetBrains Mono',monospace;pointer-events:none;opacity:.55}
 </style></head><body class="pb-[90px]">
 <div id="app" class="max-w-[720px] mx-auto"></div>
 <div id="toast" class="fixed bottom-[100px] left-1/2 -translate-x-1/2 bg-white text-black px-5 py-2 rounded-full font-bold hidden z-[99] mono text-[13px] text-center max-w-[90%]"></div>
@@ -44,14 +44,18 @@ textarea{font-family:'JetBrains Mono',monospace}
   </div>
 </div>
 
-<!-- Timer emergente (⏱ popup): countdown manual, con sonido + opción de
-     sonido propio vía el picker nativo del sistema ("abrir con..."). -->
-<button id="timerFab" onclick="openTimerModal()" class="fixed right-4 bottom-[110px] z-[90] w-14 h-14 rounded-full bg-[#161b22] border border-[#21262d] shadow-lg flex items-center justify-center text-[22px]">⏱</button>
+<!-- Timer emergente (⏱): SIEMPRE atado a un hábito específico -- se abre
+     desde el botón ⏱ que aparece dentro de cada hábito que tiene comando
+     ⏱N en su Ubicación (ver renderHabitSlider). Pre-carga esos minutos,
+     pero quedan editables por si esa sesión puntual necesita extenderse
+     más que la duración configurada. Al llegar a cero, ofrece loguear
+     el hábito ahí mismo. -->
 <div id="timerModal" class="fixed inset-0 bg-black/70 backdrop-blur-sm hidden z-[101] flex items-center justify-center p-4">
   <div class="bg-[#161b22] border border-[#30363d] rounded-[20px] p-5 w-full max-w-[360px] text-center">
-    <h3 class="font-bold serif italic text-[18px]">Timer emergente</h3>
+    <h3 class="font-bold serif italic text-[18px]">Timer</h3>
+    <p id="timerHabitLabel" class="mono text-[11px] text-[#58CC02] mt-0.5"></p>
     <div id="timerIdleView">
-      <p class="mono text-[11px] text-[#7d8590] mt-1">Contador independiente, con alerta sonora al llegar a cero.</p>
+      <p class="mono text-[11px] text-[#7d8590] mt-1">Precargado con el ⏱ configurado en Ubicación — editalo si esta sesión necesita más o menos tiempo.</p>
       <input id="timerMinutesInput" type="number" min="1" max="180" value="5" class="mt-4 w-full bg-[#0d1117] border border-[#21262d] rounded-[12px] p-3 mono text-[20px] text-center outline-none focus:border-[#58CC02]">
       <div class="mono text-[10px] text-[#5d666f] mt-1">minutos</div>
       <label class="mt-4 flex items-center justify-between gap-2 bg-[#0d1117] border border-[#21262d] rounded-[12px] p-3 cursor-pointer">
@@ -80,7 +84,13 @@ textarea{font-family:'JetBrains Mono',monospace}
     <div id="timerDoneView" class="hidden">
       <div class="text-[56px] mt-2 animate-[popIn_.3s_ease]">⏰</div>
       <div class="font-bold mt-1">¡Tiempo!</div>
-      <button onclick="closeTimerModal()" class="w-full mt-6 py-3 rounded-full bg-white text-black mono text-[12px] font-bold">Listo</button>
+      <p class="mono text-[10px] text-[#7d8590] mt-1">¿Cómo salió?</p>
+      <div class="flex gap-2 mt-3">
+        <button onclick="logFromTimer('✅')" class="flex-1 py-2.5 rounded-full bg-[#1a2e1a] border border-[#58CC02]/30 text-[15px]">✅</button>
+        <button onclick="logFromTimer('🟩')" class="flex-1 py-2.5 rounded-full bg-[#1e2a15] border border-[#21262d] text-[15px]">🟩</button>
+        <button onclick="logFromTimer('❎')" class="flex-1 py-2.5 rounded-full bg-[#2a1515] border border-[#21262d] text-[15px]">❎</button>
+      </div>
+      <button onclick="closeTimerModal()" class="w-full mt-3 py-2 rounded-full bg-[#21262d] mono text-[11px] text-[#7d8590]">Cerrar sin loguear</button>
     </div>
   </div>
 </div>
@@ -130,8 +140,12 @@ function colorFor(title){
      ⏱30          -> sesión de 30min, ancla = inicio real del evento de HOY
      ⏳15          -> gracia extra: 15min ADICIONALES tras el fin de la
                       sesión antes de bloquear "Perfecto" (default: 0)
-     - Paso 1      -> ítem de checklist
-     - Paso 2      -> ítem de checklist
+     - Paso 1      -> ítem de checklist (formato principal)
+     ¹Paso 1       -> también válido -- por si ya tenías pasos escritos
+                      con superíndice literal en Calendar. El dígito en
+                      sí se IGNORA (no hace falta mantenerlo incrementado
+                      a mano); el número que se ve en la app sale siempre
+                      del orden real de aparición de la línea.
    ============================================================ */
 function parseLocationCommands(locationText){
   const lines = (locationText||'').split('\n').map(l=>l.trim()).filter(Boolean);
@@ -143,8 +157,10 @@ function parseLocationCommands(locationText){
     if(timerMatch){ timerMinutes = parseInt(timerMatch[1],10); return; }
     const graceMatch = line.match(/^⏳\s*(\d+)/);
     if(graceMatch){ graceMinutes = parseInt(graceMatch[1],10); return; }
-    const stepMatch = line.match(/^-\s*(.+)/);
-    if(stepMatch){ checklist.push(stepMatch[1].trim()); }
+    const dashMatch = line.match(/^-\s*(.+)/);
+    if(dashMatch){ checklist.push(dashMatch[1].trim()); return; }
+    const superMatch = line.match(/^[⁰¹²³⁴⁵⁶⁷⁸⁹]+\.?\s*(.+)/);
+    if(superMatch){ checklist.push(superMatch[1].trim()); }
   });
   return { timerMinutes, graceMinutes, checklist };
 }
@@ -474,6 +490,10 @@ function render(){
       ${!isHardcore ? ` • ${'❄'.repeat(streakState.freezesAvailable||0)} ${streakState.freezesAvailable||0}/2 freeze` : ''}
       ${isHardcore && streakState.repair ? ` • ⏳ Reparando: ${streakState.repair.perfectsDone.length}/3 perfectos` : ''}<span id="hardcoreCountdown" class="text-[#ff4b4b] font-bold"></span>
     </div>
+    <div id="dailyDangerBanner" class="hidden mt-3 rounded-[14px] bg-[#3a1414] border border-[#ff4b4b]/50 px-4 py-2.5 flex items-center justify-between gap-2 animate-[pulseRing_2s_infinite]">
+      <span class="mono text-[10.5px] font-bold text-[#ff7b72]">⚠️ Sin loguear nada hoy — Hardcore rompe a medianoche</span>
+      <span id="dailyDangerCountdown" class="mono text-[13px] font-[800] text-[#ff4b4b] flex-shrink-0"></span>
+    </div>
   </div>
 
   <div class="px-4 mt-6" id="tabContent"></div>
@@ -492,7 +512,8 @@ function render(){
   renderTab();
   if(_hardcoreCountdownInterval) clearInterval(_hardcoreCountdownInterval);
   updateHardcoreCountdown();
-  _hardcoreCountdownInterval = setInterval(updateHardcoreCountdown, 1000);
+  updateDailyDangerBanner();
+  _hardcoreCountdownInterval = setInterval(()=>{ updateHardcoreCountdown(); updateDailyDangerBanner(); }, 1000);
 }
 
 // Countdown de "modo hardcore" -- por decisión explícita, solo se muestra
@@ -510,6 +531,37 @@ function updateHardcoreCountdown(){
   if(msLeft > 24*60*60*1000){ el.textContent=''; return; } // fuera de la ventana de peligro todavía
   const h=Math.floor(msLeft/3600000), m=Math.floor((msLeft%3600000)/60000), s=Math.floor((msLeft%60000)/1000);
   el.textContent = ` • 🔥 ÚLTIMO DÍA ${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+}
+
+// Aviso PREVENTIVO diario -- distinto del countdown de arriba. Ese es de
+// RESCATE (aparece después de fallar, corre 72h). Este es preventivo:
+// avisa ANTES de fallar, todos los días, en el último tramo antes de
+// medianoche, si Hardcore está activo y hoy todavía no hay ni un solo
+// log (con un solo log de cualquier hábito, el día ya no cuenta como
+// vacío para la racha -- ver computeStreak/computeStreakClient).
+const DAILY_DANGER_HOURS_BEFORE_MIDNIGHT = 3;
+function computeDailyDangerState_(){
+  const data = STATE.data;
+  if(!data || data.streakState.mode !== 'hardcore') return null;
+  if(data.streakState.repair) return null; // si ya está reparando, esa alerta manda y no se solapan
+  const now = new Date();
+  const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()+1, 0,0,0,0);
+  const msLeft = midnight - now;
+  if(msLeft > DAILY_DANGER_HOURS_BEFORE_MIDNIGHT*3600000) return null;
+  const todayKey = data.today.key;
+  const logsHoy = (getEffectiveData().allLogs||[]).filter(l=>l.key===todayKey);
+  if(logsHoy.length > 0) return null; // ya hay algo logueado hoy -- el día ya no cuenta como vacío
+  return { msLeft };
+}
+function updateDailyDangerBanner(){
+  const banner = document.getElementById('dailyDangerBanner');
+  const countdownEl = document.getElementById('dailyDangerCountdown');
+  if(!banner || !countdownEl) return;
+  const state = computeDailyDangerState_();
+  if(!state){ banner.classList.add('hidden'); return; }
+  banner.classList.remove('hidden');
+  const h=Math.floor(state.msLeft/3600000), m=Math.floor((state.msLeft%3600000)/60000), s=Math.floor((state.msLeft%60000)/1000);
+  countdownEl.textContent = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
 }
 
 function switchMode(mode){
@@ -962,7 +1014,7 @@ function renderRawViewBlock(title){
    (<input type=file>, la única forma real de "abrir con..." que
    permite la web -- no hay acceso a filesystem persistente).
    ============================================================ */
-let TIMER_STATE = { running:false, endsAt:0, intervalId:null, customAudioUrl:null };
+let TIMER_STATE = { running:false, endsAt:0, totalMs:0, intervalId:null, customAudioUrl:null, habitTitle:null };
 
 function playDefaultBeep(){
   try{
@@ -989,7 +1041,22 @@ function playAlertSound(){
   hapticPulse([120,60,120,60,200]);
 }
 
-function openTimerModal(){
+function openTimerModal(habitTitle){
+  const habit = STATE.data.habits.find(h=>h.title===habitTitle);
+  TIMER_STATE.habitTitle = habitTitle || null;
+  const label = document.getElementById('timerHabitLabel');
+  const minutesInput = document.getElementById('timerMinutesInput');
+  if(habit){
+    const { timerMinutes } = parseLocationCommands(habit.location);
+    label.textContent = habit.title;
+    // Precarga el ⏱ configurado en Ubicación -- pero queda editable acá
+    // mismo por si esta sesión puntual necesita correr más (o menos)
+    // tiempo que el default sin tener que tocar Calendar.
+    minutesInput.value = timerMinutes || 5;
+  } else {
+    label.textContent = '';
+    minutesInput.value = 5;
+  }
   document.getElementById('timerModal').classList.remove('hidden');
   document.getElementById('timerIdleView').classList.remove('hidden');
   document.getElementById('timerRunningView').classList.add('hidden');
@@ -997,6 +1064,23 @@ function openTimerModal(){
 }
 function closeTimerModal(){
   document.getElementById('timerModal').classList.add('hidden');
+}
+// Al terminar el timer, loguea directo el hábito al que estaba atado --
+// respeta la misma regla de checklist que el slider (no deja ✅ si hay
+// pasos sin completar) y reusa el modal de motivo obligatorio de siempre.
+function logFromTimer(estado){
+  const title = TIMER_STATE.habitTitle;
+  if(!title){ closeTimerModal(); return; }
+  if(estado === '✅'){
+    const habit = STATE.data.habits.find(h=>h.title===title);
+    const { checklist } = parseLocationCommands(habit ? habit.location : '');
+    if(!checklistComplete(title, STATE.data.today.key, checklist)){
+      showToast('⚠️ Completá el checklist antes de marcar Perfecto');
+      return;
+    }
+  }
+  closeTimerModal();
+  openModal(title, estado);
 }
 function startEmergentTimer(){
   const minutes = Math.max(1, parseInt(document.getElementById('timerMinutesInput').value,10)||5);
@@ -1071,14 +1155,18 @@ function renderHabitSlider(habit){
   const { checklist } = parseLocationCommands(habit.location);
   const todayKey = STATE.data.today.key;
   const checklistOk = checklistComplete(habit.title, todayKey, checklist);
+  const titleAttr = habit.title.replace(/"/g,'&quot;');
+  const titleJs = habit.title.replace(/'/g,"\\'");
   return `
-    <div class="hslider-track" data-title="${habit.title.replace(/"/g,'&quot;')}" data-locked="${timer.locked?1:0}" data-checklist-ok="${checklistOk?1:0}">
-      <div class="hslider-zone" style="left:0;width:33%;background:linear-gradient(90deg,#ff4b4b33,transparent)"></div>
-      <div class="hslider-zone" style="right:0;width:33%;background:linear-gradient(270deg,${timer.locked?'#58CC0210':'#58CC0233'},transparent)"></div>
-      <span class="hslider-label" style="left:14px">❎</span>
-      <span class="hslider-label" style="right:${timer.locked?'44px':'14px'}">${timer.locked?'🟩':'✅'}</span>
-      ${!timer.locked ? `<span class="hslider-label" style="right:56px;opacity:.35;font-size:9px">🟩</span>` : ''}
-      <div class="hslider-thumb" style="left:calc(50% - 26px);opacity:0">❎</div>
+    <div class="flex items-center gap-2">
+      <button onclick="openModal('${titleJs}','❎')" class="flex-shrink-0 w-11 h-11 rounded-[14px] bg-[#2a1515] border border-[#ff4b4b]/50 flex items-center justify-center text-[17px] active:scale-95 transition">❎</button>
+      <div class="hslider-track flex-1" data-title="${titleAttr}" data-locked="${timer.locked?1:0}" data-checklist-ok="${checklistOk?1:0}">
+        <div class="hslider-zone" style="right:0;width:45%;background:linear-gradient(270deg,${timer.locked?'#58CC0210':'#58CC0233'},transparent)"></div>
+        <span class="hslider-label" style="right:${timer.locked?'40px':'12px'}">${timer.locked?'🟩':'✅'}</span>
+        ${!timer.locked ? `<span class="hslider-label" style="right:50px;opacity:.35;font-size:9px">🟩</span>` : ''}
+        <div class="hslider-thumb" style="left:6px;opacity:0">🟩</div>
+      </div>
+      ${timer.hasTimer ? `<button onclick="openTimerModal('${titleJs}')" class="flex-shrink-0 w-11 h-11 rounded-[14px] bg-[#0d1117] border border-[#21262d] flex items-center justify-center text-[16px] active:scale-95 transition">⏱</button>` : ''}
     </div>`;
 }
 
@@ -1115,54 +1203,51 @@ function attachSliderHandlers(){
     track.dataset.bound = '1';
     const thumb = track.querySelector('.hslider-thumb');
 
+    // ❎ ya es un botón fijo aparte (ver renderHabitSlider) -- este track
+    // ahora solo decide entre 🟩 y ✅. Reposo = extremo izquierdo (neutral,
+    // sin acción); hay que arrastrar activamente para elegir.
     function geometry(){
-      const w = track.offsetWidth, tw = 52;
-      const maxOffset = (w - tw)/2 - 6;
-      // restX = posición de descanso = la propia zona ❎. Por diseño, "fail"
-      // es el único estado que no requiere gesto -- el slider YA arranca ahí,
-      // así que un simple toque sin arrastrar alcanza para candidatear ❎
-      // (todavía hay que confirmar motivo en el modal, no se manda solo).
-      return { maxOffset, failAt: -0.35*maxOffset, okAt: 0.35*maxOffset, perfectAt: 0.78*maxOffset };
+      const w = track.offsetWidth, tw = 40;
+      const maxOffset = w - tw - 12;
+      return { maxOffset, restAt: 0, okAt: 0.42*maxOffset, perfectAt: 0.82*maxOffset };
     }
     function setThumb(dx, dragging){
       thumb.style.opacity = '1';
       thumb.classList.toggle('dragging', !!dragging);
       thumb.style.transform = `translateX(${dx}px)`;
       const g = geometry();
-      let zone='fail', icon='❎', bg='#3a1414', bd='#ff4b4b';
+      let zone='neutral', icon='↔', bg='#21262d', bd='#30363d';
       if(dx >= g.perfectAt){ zone='perfect'; icon='✅'; bg='#0d2a1a'; bd='#58CC02'; }
       else if(dx >= g.okAt){ zone='ok'; icon='🟩'; bg='#1e2a15'; bd='#a3e635'; }
-      else if(dx > g.failAt){ zone='neutral'; icon='↔'; bg='#21262d'; bd='#30363d'; }
       thumb.textContent = icon;
       thumb.style.background = bg; thumb.style.borderColor = bd;
       return zone;
     }
 
-    // Posición inicial: en reposo, exactamente en la zona ❎.
+    // Posición inicial: en reposo, neutral (sin candidatear nada -- el
+    // fail ahora es el botón fijo de al lado, no parte de este gesto).
     const g0 = geometry();
-    setThumb(g0.failAt, false);
+    setThumb(g0.restAt, false);
 
-    let startX=0, curDx=g0.failAt, lastZone='fail', pointerId=null;
+    let startX=0, curDx=g0.restAt, lastZone='neutral', pointerId=null;
 
     track.addEventListener('pointerdown', (e)=>{
       pointerId = e.pointerId;
       try{ track.setPointerCapture(pointerId); }catch(e){ /* navegador raro sin soporte -- seguimos igual */ }
       const g = geometry();
-      startX = e.clientX; curDx = g.failAt; lastZone='fail';
-      setThumb(g.failAt, true);
+      startX = e.clientX; curDx = g.restAt; lastZone='neutral';
+      setThumb(g.restAt, true);
     });
     track.addEventListener('pointermove', (e)=>{
       if(e.pointerId !== pointerId) return;
       const g = geometry();
-      let dx = g.failAt + (e.clientX - startX);
+      let dx = g.restAt + (e.clientX - startX);
       const locked = track.dataset.locked === '1';
       // Bloqueo FÍSICO: si venció el timer, el tope derecho se recorta
       // antes de la zona "perfecto" -- por más que el dedo siga, el
       // thumb no la alcanza (no es solo un botón gris, no llega el gesto).
-      const rightCap = locked ? (g.okAt + (g.perfectAt-g.okAt)*0.4) : g.perfectAt + 6;
-      // El límite izquierdo es la propia posición de descanso -- no hay
-      // "más fail que fail", así que no puede irse más allá.
-      dx = Math.max(g.failAt, Math.min(rightCap, dx));
+      const rightCap = locked ? (g.okAt + (g.perfectAt-g.okAt)*0.4) : g.maxOffset;
+      dx = Math.max(g.restAt, Math.min(rightCap, dx));
       curDx = dx;
       const zone = setThumb(dx, true);
       if(zone !== lastZone){ hapticPulse(18); lastZone = zone; }
@@ -1174,11 +1259,11 @@ function attachSliderHandlers(){
       const title = track.dataset.title;
       const checklistOk = track.dataset.checklistOk === '1';
       let estado = null;
-      if(curDx <= g.failAt) estado = '❎';
-      else if(curDx >= g.perfectAt) estado = '✅';
+      if(curDx >= g.perfectAt) estado = '✅';
       else if(curDx >= g.okAt) estado = '🟩';
-      // Soltar en la zona neutral (entre fail y ok, sin llegar a ninguna)
-      // no dispara nada -- el thumb simplemente vuelve a descansar en ❎.
+      // Soltar en la zona neutral (sin llegar a ok) no dispara nada --
+      // el thumb simplemente vuelve a reposo. Para fallar, está el botón
+      // ❎ fijo al costado, ya no es parte de este gesto.
 
       if(estado === '✅' && !checklistOk){
         showToast('⚠️ Completá el checklist antes de marcar Perfecto');
@@ -1190,15 +1275,15 @@ function attachSliderHandlers(){
         thumb.style.transition = 'transform .18s ease';
         setTimeout(()=>{
           thumb.style.transition = '';
-          setThumb(g.failAt, false);
+          setThumb(g.restAt, false);
           openModal(title, estado);
         }, 180);
       } else {
         thumb.style.transition = 'transform .18s ease';
-        setThumb(g.failAt, false);
+        setThumb(g.restAt, false);
         setTimeout(()=>{ thumb.style.transition=''; }, 180);
       }
-      curDx = g.failAt; lastZone = 'fail';
+      curDx = g.restAt; lastZone = 'neutral';
     }
     track.addEventListener('pointerup', endDrag);
     track.addEventListener('pointercancel', endDrag);
