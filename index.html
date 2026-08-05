@@ -162,6 +162,26 @@ function colorFor(title){
 }
 
 /* ============================================================
+   HÁBITOS NO-DIARIOS — activeWeekdays viene del backend, leído
+   directo del RRULE real del evento en Calendar (ver
+   activeWeekdaysFromMaster_ en Habitracker.gs). null = diario,
+   sin restricción. Esto es lo que faltaba: antes no había ningún
+   chequeo acá, así que tocar un hábito MWF un martes disparaba el
+   error crudo del backend ("No encontré ocurrencia de hoy").
+   ============================================================ */
+function isDueToday(habit){
+  if(!habit || !habit.activeWeekdays) return true;
+  return habit.activeWeekdays.includes(new Date().getDay());
+}
+function nextDueLabel(habit){
+  if(!habit || !habit.activeWeekdays || !habit.activeWeekdays.length) return '';
+  const dow=new Date().getDay();
+  const sorted=[...habit.activeWeekdays].sort((a,b)=>a-b);
+  const next = sorted.find(d=>d>dow);
+  return DAY_FULL[next!==undefined ? next : sorted[0]];
+}
+
+/* ============================================================
    COMANDOS EN UBICACIÓN — parser de ⏱ (timer de sesión), ⏳ (gracia
    extra, opcional) y checklist (rutinas compuestas). Todo opcional:
      ⏱30          -> sesión de 30min, ancla = inicio real del evento de HOY
@@ -403,10 +423,22 @@ function buildLogLine(estado, motivoRaw){
 
 function enqueueLog(title, estado, motivoRaw){
   const line=buildLogLine(estado, motivoRaw);
-  const item={ id:'q_'+Date.now()+'_'+Math.random().toString(36).slice(2,8), title, pending:true, ...line };
+  const item={ id:'q_'+Date.now()+'_'+Math.random().toString(36).slice(2,8), title, pending:true, retries:0, failed:false, ...line };
   STATE.pendingQueue.push(item);
   saveQueueToStorage(STATE.pendingQueue);
   return item;
+}
+
+// Reintenta a mano un registro que ya se marcó como fallido permanente
+// (superó MAX_SYNC_RETRIES) -- resetea su contador y lo vuelve a poner
+// en juego para el ciclo normal de sincronización.
+function retryPendingItem(id){
+  const item=(STATE.pendingQueue||[]).find(i=>i.id===id);
+  if(!item) return;
+  item.failed=false; item.retries=0; delete item.lastError;
+  saveQueueToStorage(STATE.pendingQueue);
+  renderTab();
+  trySync(true);
 }
 
 function cancelPending(id){
@@ -434,16 +466,26 @@ function getEffectiveData(){
   return { ...data, habits, allLogs };
 }
 
+// Tope de reintentos automáticos por registro. Sin esto, un registro que
+// falla por una razón NO transitoria (ej. el hábito ya no tiene ocurrencia
+// hoy, o cualquier error 4xx del backend) reintentaba cada 30s para
+// siempre, y como siempre se probaba el head de la cola, también trababa
+// a todos los registros que venían detrás. Al superar el tope, el item se
+// marca `failed` (no se borra, para no perder el registro) y se salta al
+// siguiente pendiente -- el usuario lo ve en Log con un botón "reintentar".
+const MAX_SYNC_RETRIES = 5;
+
 let syncInFlight=false;
 function trySync(showFeedback){
   if(syncInFlight) return;
   if(!STATE.pendingQueue || !STATE.pendingQueue.length) return;
   if(navigator.onLine===false) return;
+  const item = STATE.pendingQueue.find(i=>!i.failed);
+  if(!item) return; // todo lo pendiente ya falló permanentemente, espera acción manual
   syncInFlight=true;
-  const item=STATE.pendingQueue[0];
   callServer('addLog', {title:item.title, estado:item.estado, motivo:item.motivo}).then(r=>{
     syncInFlight=false;
-    STATE.pendingQueue.shift();
+    STATE.pendingQueue = STATE.pendingQueue.filter(i=>i.id!==item.id);
     saveQueueToStorage(STATE.pendingQueue);
     if(STATE.data) STATE.data.streakState = r.streakState || STATE.data.streakState;
     // aviso conocido: el servidor fecha el log con SU día actual, no
@@ -451,16 +493,30 @@ function trySync(showFeedback){
     if(r.dateUsed && r.dateUsed !== item.key){
       showToast(`⚠️ "${item.title}" se guardó con fecha ${r.dateUsed} (lo hiciste el ${item.key}) — corrígelo en Log > historial editable`);
     }
-    if(STATE.pendingQueue.length){
+    if(STATE.pendingQueue.some(i=>!i.failed)){
       trySync(showFeedback);
     } else {
-      if(showFeedback && !(r.dateUsed && r.dateUsed !== item.key)) showToast('☁️ Todo sincronizado');
+      if(showFeedback && !STATE.pendingQueue.length && !(r.dateUsed && r.dateUsed !== item.key)) showToast('☁️ Todo sincronizado');
       load();
     }
     renderTab();
   }).catch(e=>{
     syncInFlight=false;
-    if(showFeedback) showToast('⚠️ Sin conexión con el servidor, reintento luego');
+    item.retries = (item.retries||0) + 1;
+    item.lastError = (e && e.message) || 'Error desconocido';
+    if(item.retries >= MAX_SYNC_RETRIES){
+      item.failed = true;
+      showToast(`⚠️ "${item.title}" no se pudo sincronizar tras ${MAX_SYNC_RETRIES} intentos — revisalo en Log`);
+    } else if(showFeedback){
+      showToast('⚠️ Sin conexión con el servidor, reintento luego');
+    }
+    saveQueueToStorage(STATE.pendingQueue);
+    renderTab();
+    // si este se marcó failed pero quedan otros sin marcar, seguimos con
+    // el próximo en vez de quedar trabados en el mismo para siempre
+    if(item.failed && STATE.pendingQueue.some(i=>!i.failed)){
+      trySync(showFeedback);
+    }
   });
 }
 
@@ -537,11 +593,14 @@ function render(){
 
   const isHardcore = streakState.mode==='hardcore';
   const modeColor = isHardcore ? '#ff4b4b' : '#58CC02';
+  const queueNow = STATE.pendingQueue||[];
+  const failedNow = queueNow.filter(i=>i.failed).length;
+  const pendingNow = queueNow.length - failedNow;
 
   document.getElementById('app').innerHTML = `
   <div class="px-4 pt-6">
     <div class="flex justify-between items-center">
-      <div class="text-[26px] font-[800] tracking-tighter">${data.today.emoji}${data.today.key} <span class="text-[13px] font-normal text-[#7d8590]">${data.calendarName}</span>${STATE.pendingQueue && STATE.pendingQueue.length ? ` <span class="text-[11px] mono text-[#f59e0b] align-middle">⏳${STATE.pendingQueue.length}</span>` : ''}</div>
+      <div class="text-[26px] font-[800] tracking-tighter">${data.today.emoji}${data.today.key} <span class="text-[13px] font-normal text-[#7d8590]">${data.calendarName}</span>${pendingNow ? ` <span class="text-[11px] mono text-[#f59e0b] align-middle">⏳${pendingNow}</span>` : ''}${failedNow ? ` <span class="text-[11px] mono text-[#ff4b4b] align-middle">⚠️${failedNow}</span>` : ''}</div>
       <div class="flex bg-[#161b22] rounded-full p-1 border border-[#21262d]">
         <button onclick="switchMode('resiliente')" class="px-3 py-1 rounded-full text-[11px] mono font-bold transition ${streakState.mode==='resiliente'?'bg-[#58CC02] text-black':'text-[#7d8590]'}">Resiliente</button>
         <button onclick="switchMode('hardcore')" class="px-3 py-1 rounded-full text-[11px] mono font-bold transition ${streakState.mode==='hardcore'?'bg-white text-black':'text-[#7d8590]'}">Hardcore</button>
@@ -950,14 +1009,25 @@ function drawChart(){
 function renderLogTab(el){
   const data=getEffectiveData();
   const queue=STATE.pendingQueue||[];
+  const failedCount=queue.filter(i=>i.failed).length;
+  const pendingCount=queue.length-failedCount;
   const offline = navigator.onLine===false;
 
-  const banner = (queue.length || offline) ? `
-    <div class="rounded-[16px] p-3 mb-4 flex items-center justify-between gap-2 ${offline?'bg-[#3a2a0d] border border-[#f59e0b]/40':'bg-[#0d2a1a] border border-[#58CC02]/30'}">
-      <div class="mono text-[10.5px] ${offline?'text-[#f59e0b]':'text-[#58CC02]'}">
-        ${offline ? '📴 Sin conexión — se guarda local y sincroniza solo al volver' : `⏳ ${queue.length} registro${queue.length>1?'s':''} pendiente${queue.length>1?'s':''} de sincronizar`}
-      </div>
-      ${(!offline && queue.length) ? `<button onclick="trySync(true)" class="mono text-[10px] font-bold bg-white text-black rounded-full px-3 py-1.5 whitespace-nowrap">Sincronizar</button>` : ''}
+  const banner = (pendingCount || failedCount || offline) ? `
+    <div class="mb-4 space-y-2">
+      ${offline ? `
+        <div class="rounded-[16px] p-3 flex items-center justify-between gap-2 bg-[#3a2a0d] border border-[#f59e0b]/40">
+          <div class="mono text-[10.5px] text-[#f59e0b]">📴 Sin conexión — se guarda local y sincroniza solo al volver</div>
+        </div>` : ''}
+      ${pendingCount ? `
+        <div class="rounded-[16px] p-3 flex items-center justify-between gap-2 bg-[#0d2a1a] border border-[#58CC02]/30">
+          <div class="mono text-[10.5px] text-[#58CC02]">⏳ ${pendingCount} registro${pendingCount>1?'s':''} pendiente${pendingCount>1?'s':''} de sincronizar</div>
+          ${!offline ? `<button onclick="trySync(true)" class="mono text-[10px] font-bold bg-white text-black rounded-full px-3 py-1.5 whitespace-nowrap">Sincronizar</button>` : ''}
+        </div>` : ''}
+      ${failedCount ? `
+        <div class="rounded-[16px] p-3 flex items-center justify-between gap-2 bg-[#3a1414] border border-[#ff4b4b]/50">
+          <div class="mono text-[10.5px] text-[#ff7b72]">⚠️ ${failedCount} no se pudo${failedCount>1?'ieron':''} sincronizar tras ${MAX_SYNC_RETRIES} intentos</div>
+        </div>` : ''}
     </div>
   ` : '';
 
@@ -973,10 +1043,15 @@ function renderLogTab(el){
             <button onclick="toggleRawView('${h.title.replace(/'/g,"\\'")}')" class="mono text-[10px] text-[#7d8590] border border-[#21262d] rounded-full px-2.5 py-1 whitespace-nowrap">${STATE.rawView[h.title]?.open ? 'Ocultar' : 'Ver/editar historial'}</button>
           </div>
           <div class="mono text-[10px] text-[#5d666f] mt-1 max-h-[100px] overflow-auto space-y-0.5">
-            ${h.logs.slice(-6).map(l=> l.pending
-              ? `<div class="flex items-center justify-between gap-2 text-[#f59e0b]"><span>⏳ ${l.raw}</span><button onclick="cancelPending('${l.id}')" class="text-[#7d8590] px-1">✕</button></div>`
-              : `<div>${l.raw}</div>`
-            ).join('') || 'sin logs'}
+            ${h.logs.slice(-6).map(l=>{
+              if(l.pending && l.failed){
+                return `<div class="flex items-center justify-between gap-2 text-[#ff7b72]"><span>⚠️ ${l.raw} <span class="opacity-60">(${l.retries||0} intentos)</span></span><span class="flex gap-2 flex-shrink-0"><button onclick="retryPendingItem('${l.id}')" class="text-[#58CC02] px-1">↻ reintentar</button><button onclick="cancelPending('${l.id}')" class="text-[#7d8590] px-1">✕</button></span></div>`;
+              }
+              if(l.pending){
+                return `<div class="flex items-center justify-between gap-2 text-[#f59e0b]"><span>⏳ ${l.raw}</span><button onclick="cancelPending('${l.id}')" class="text-[#7d8590] px-1">✕</button></div>`;
+              }
+              return `<div>${l.raw}</div>`;
+            }).join('') || 'sin logs'}
           </div>
           <div id="rawView_${idx}"></div>
           <div class="mt-3">${renderHabitSlider(h)}${habitExtraInfo(h)}</div>
@@ -1308,6 +1383,11 @@ document.addEventListener('DOMContentLoaded', ()=>{
    obligatorio siempre, ver modalSave).
    ============================================================ */
 function renderHabitSlider(habit){
+  if(!isDueToday(habit)){
+    return `<div class="flex items-center gap-2 h-11 px-3 rounded-[14px] bg-[#0d1117] border border-[#21262d] opacity-60">
+      <span class="mono text-[11px] text-[#5d666f]">📅 No toca hoy — próximo: ${nextDueLabel(habit)}</span>
+    </div>`;
+  }
   const timer = getHabitTimerState(habit);
   const { checklist } = parseLocationCommands(habit.location);
   const todayKey = STATE.data.today.key;
@@ -1551,6 +1631,14 @@ function attachSliderHandlers(){
 
 /* ================= Modal ================= */
 function openModal(title, estado){
+  // Respaldo: el slider ya se esconde solo (ver renderHabitSlider), pero
+  // el timer emergente y el FAB "en curso ahora" también pueden llegar
+  // acá directo -- este chequeo cubre esos caminos también.
+  const habitCheck = STATE.data && STATE.data.habits.find(h=>h.title===title);
+  if(habitCheck && !isDueToday(habitCheck)){
+    showToast(`📅 "${title}" no toca hoy — próximo: ${nextDueLabel(habitCheck)}`);
+    return;
+  }
   STATE.pendingLog={title, estado};
   document.getElementById('modalTitle').textContent=title+' '+estado;
   document.getElementById('modalHint').textContent = 'Motivo obligatorio ej: CenaTarde';
