@@ -36,11 +36,38 @@ textarea{font-family:'JetBrains Mono',monospace}
 </style></head><body class="pb-[90px]">
 <div id="app" class="max-w-[720px] mx-auto"></div>
 <div id="toast" class="fixed bottom-[100px] left-1/2 -translate-x-1/2 bg-white text-black px-5 py-2 rounded-full font-bold hidden z-[99] mono text-[13px] text-center max-w-[90%]"></div>
+<button id="runningFab" onclick="openRunningModal()" class="hidden fixed right-4 bottom-[110px] z-[90] w-14 h-14 rounded-full bg-[#161b22] border border-[#21262d] shadow-lg flex items-center justify-center text-[22px]">⏱</button>
 <div id="modal" class="fixed inset-0 bg-black/70 backdrop-blur-sm hidden z-[100] flex items-center justify-center p-4">
   <div class="bg-[#161b22] border border-[#30363d] rounded-[20px] p-5 w-full max-w-[360px]">
     <h3 id="modalTitle" class="font-bold"></h3><p id="modalHint" class="mono text-[11px] text-[#7d8590] mt-1"></p>
     <input id="modalInput" class="mt-3 w-full bg-[#0d1117] border border-[#21262d] rounded-[12px] p-3 mono text-[13px] outline-none focus:border-[#58CC02]" placeholder="CenaTarde">
     <div class="flex gap-2 mt-4"><button onclick="closeModal()" class="flex-1 py-3 rounded-full bg-[#21262d] mono text-[12px]">Cancelar</button><button id="modalSave" class="flex-1 py-3 rounded-full bg-white text-black mono text-[12px] font-bold">Guardar</button></div>
+  </div>
+</div>
+
+<!-- "En curso ahora" (⏱ flotante global): a diferencia del timer emergente
+     de arriba (que vos armás a mano, cualquier duración), esto detecta
+     SOLO qué hábito(s) están, en este preciso momento, dentro de su
+     ventana real [inicio del evento en Calendar, inicio+⏱+gracia] -- y
+     muestra cuánto de esa ventana ya pasó con una barra de progreso.
+     Confirmar acá usa la misma auto-clasificación que el slider. -->
+<div id="runningModal" class="fixed inset-0 bg-black/70 backdrop-blur-sm hidden z-[102] flex items-center justify-center p-4">
+  <div class="bg-[#161b22] border border-[#30363d] rounded-[20px] p-5 w-full max-w-[360px]">
+    <div id="runningPickerView" class="hidden">
+      <h3 class="font-bold serif italic text-[16px] mb-3">Más de uno corriendo ahora</h3>
+      <div id="runningPickerList" class="space-y-2"></div>
+      <button onclick="closeRunningModal()" class="w-full mt-4 py-2.5 rounded-full bg-[#21262d] mono text-[12px]">Cerrar</button>
+    </div>
+    <div id="runningStatusView" class="hidden text-center">
+      <p id="runningHabitLabel" class="font-bold text-[16px]"></p>
+      <p class="mono text-[10px] text-[#5d666f] mt-0.5">en curso ahora</p>
+      <div class="mt-4 h-2 rounded-full bg-[#0d1117] border border-[#21262d] overflow-hidden">
+        <div id="runningProgressBar" class="h-full rounded-full" style="width:0%;background:#58CC02;transition:width .3s linear, background .3s"></div>
+      </div>
+      <p id="runningProgressLabel" class="mono text-[10px] text-[#7d8590] mt-1.5"></p>
+      <button id="runningConfirmBtn" onclick="confirmFromRunningModal()" class="w-full mt-4 py-3 rounded-full bg-white text-black mono text-[13px] font-bold">Confirmar</button>
+      <button onclick="closeRunningModal()" class="w-full mt-2 py-2 rounded-full bg-[#21262d] mono text-[11px] text-[#7d8590]">Cerrar</button>
+    </div>
   </div>
 </div>
 
@@ -181,9 +208,32 @@ function getHabitTimerState(habit){
   const inGrace = now > sessionEnd && now <= deadline;
   return {
     hasTimer:true, deadline, sessionEnd, graceMinutes: graceMinutes||0,
+    start: new Date(habit.todayStartTime).getTime(),
     locked: now > deadline, inGrace,
     minutesLeft: Math.max(0, Math.ceil((deadline-now)/60000))
   };
+}
+
+/* ============================================================
+   AUTO-CLASIFICACIÓN — el usuario deja de elegir Perfecto vs Ok a
+   mano; solo confirma "lo hice" y el sistema decide, evaluando
+   condiciones objetivas (puntualidad + checklist). Solo aplica a
+   hábitos con ⏱ y/o checklist configurado en Ubicación -- sin
+   ninguna de las dos, no hay nada objetivo contra qué medir, así
+   que esos hábitos siguen con el gesto manual de 2 zonas de siempre.
+   ============================================================ */
+function hasAutoGrading(habit){
+  const timer = getHabitTimerState(habit);
+  const { checklist } = parseLocationCommands(habit.location);
+  return timer.hasTimer || checklist.length > 0;
+}
+function autoClassifyOutcome(habit){
+  const timer = getHabitTimerState(habit);
+  const { checklist } = parseLocationCommands(habit.location);
+  const todayKey = STATE.data.today.key;
+  const checklistOk = !checklist.length || checklistComplete(habit.title, todayKey, checklist);
+  const timerOk = !timer.hasTimer || !timer.locked;
+  return (checklistOk && timerOk) ? '✅' : '🟩';
 }
 
 /* ============================================================
@@ -510,10 +560,11 @@ function render(){
   `;
 
   renderTab();
+  updateRunningFab();
   if(_hardcoreCountdownInterval) clearInterval(_hardcoreCountdownInterval);
   updateHardcoreCountdown();
   updateDailyDangerBanner();
-  _hardcoreCountdownInterval = setInterval(()=>{ updateHardcoreCountdown(); updateDailyDangerBanner(); }, 1000);
+  _hardcoreCountdownInterval = setInterval(()=>{ updateHardcoreCountdown(); updateDailyDangerBanner(); updateRunningFab(); }, 1000);
 }
 
 // Countdown de "modo hardcore" -- por decisión explícita, solo se muestra
@@ -899,7 +950,7 @@ function renderLogTab(el){
   el.innerHTML = `
     <div class="rounded-[20px] bg-[#161b22] border border-[#21262d] p-5">
       <h3 class="font-bold mb-1 serif italic text-[16px]">Inputs detallados</h3>
-      <p class="mono text-[10px] text-[#5d666f] mb-4">Con contexto obligatorio en fallos ❎ — permite entender por qué. En ✅/🟩 el contexto es opcional, para anotar qué hizo que el día saliera bien.</p>
+      <p class="mono text-[10px] text-[#5d666f] mb-4">Contexto obligatorio siempre, para todos los estados — permite entender qué pasó ese día, tanto en fallos como en días buenos.</p>
       ${banner}
       ${data.habits.map((h,idx)=>`
         <div class="rounded-[14px] bg-[#0d1117] border border-[#21262d] p-3 mb-3">
@@ -1127,6 +1178,98 @@ function tickEmergentTimer(){
   const disp = document.getElementById('timerCountdownDisplay');
   if(disp) disp.textContent = `${mm}:${ss}`;
 }
+
+/* ============================================================
+   "EN CURSO AHORA" — botón flotante global. A diferencia del timer
+   emergente (arriba, duración arbitraria elegida a mano), esto SOLO
+   mira hábitos con ⏱ configurado cuyo rango real [inicio evento,
+   inicio+timer+gracia] contiene el momento actual -- ningún dato
+   nuevo, reusa exactamente getHabitTimerState().
+   ============================================================ */
+let _runningModalTitle = null;
+let _runningModalInterval = null;
+
+function getCurrentlyRunningHabits(){
+  if(!STATE.data) return [];
+  return STATE.data.habits.filter(h=>{
+    const t = getHabitTimerState(h);
+    return t.hasTimer && !t.locked && Date.now() >= t.start;
+  });
+}
+
+// Se llama en cada render() -- decide si el FAB se muestra en absoluto
+// (solo si existe algún hábito con ⏱ configurado, corriendo o no, para
+// que sea descubrible) y si pulsa (hay algo corriendo justo ahora).
+function updateRunningFab(){
+  const fab = document.getElementById('runningFab');
+  if(!fab || !STATE.data) return;
+  const anyTimerHabit = STATE.data.habits.some(h=>getHabitTimerState(h).hasTimer);
+  fab.classList.toggle('hidden', !anyTimerHabit);
+  const running = getCurrentlyRunningHabits().length > 0;
+  fab.classList.toggle('animate-[glow_1.8s_infinite]', running);
+  fab.style.color = running ? '#58CC02' : '';
+  fab.style.borderColor = running ? '#58CC0255' : '';
+}
+
+function openRunningModal(){
+  const running = getCurrentlyRunningHabits();
+  document.getElementById('runningPickerView').classList.add('hidden');
+  document.getElementById('runningStatusView').classList.add('hidden');
+  if(running.length === 0){
+    showToast('No hay ningún hábito con timer corriendo ahora mismo');
+    return;
+  }
+  document.getElementById('runningModal').classList.remove('hidden');
+  if(running.length === 1){
+    showRunningStatus(running[0].title);
+  } else {
+    document.getElementById('runningPickerView').classList.remove('hidden');
+    document.getElementById('runningPickerList').innerHTML = running.map(h=>{
+      const t = getHabitTimerState(h);
+      const pct = Math.round(Math.min(1, (Date.now()-t.start)/(t.deadline-t.start))*100);
+      return `<button onclick="showRunningStatus('${h.title.replace(/'/g,"\\'")}')" class="w-full text-left bg-[#0d1117] border border-[#21262d] rounded-[12px] p-3">
+        <div class="font-semibold text-[13px]">${h.title}</div>
+        <div class="mono text-[9px] text-[#5d666f] mt-1">${pct}% de la ventana</div>
+      </button>`;
+    }).join('');
+  }
+}
+function showRunningStatus(title){
+  _runningModalTitle = title;
+  document.getElementById('runningPickerView').classList.add('hidden');
+  document.getElementById('runningStatusView').classList.remove('hidden');
+  renderRunningProgress();
+  clearInterval(_runningModalInterval);
+  _runningModalInterval = setInterval(renderRunningProgress, 1000);
+}
+function renderRunningProgress(){
+  const habit = STATE.data && STATE.data.habits.find(h=>h.title===_runningModalTitle);
+  if(!habit){ closeRunningModal(); return; }
+  const t = getHabitTimerState(habit);
+  if(!t.hasTimer || t.locked){ closeRunningModal(); return; } // se venció mientras estaba abierto
+  const pct = Math.max(0, Math.min(100, Math.round((Date.now()-t.start)/(t.deadline-t.start)*100)));
+  document.getElementById('runningHabitLabel').textContent = habit.title;
+  const bar = document.getElementById('runningProgressBar');
+  bar.style.width = pct+'%';
+  bar.style.background = t.inGrace ? '#f59e0b' : '#58CC02';
+  document.getElementById('runningProgressLabel').textContent =
+    `${pct}% de [hora del evento + gracia]` + (t.inGrace ? ' • en gracia' : '') + ` • quedan ${t.minutesLeft} min`;
+}
+function closeRunningModal(){
+  document.getElementById('runningModal').classList.add('hidden');
+  clearInterval(_runningModalInterval);
+  _runningModalInterval = null;
+  _runningModalTitle = null;
+}
+function confirmFromRunningModal(){
+  const title = _runningModalTitle;
+  const habit = STATE.data && STATE.data.habits.find(h=>h.title===title);
+  if(!habit) return;
+  const estado = autoClassifyOutcome(habit);
+  closeRunningModal();
+  openModal(title, estado);
+}
+
 document.addEventListener('DOMContentLoaded', ()=>{
   const picker = document.getElementById('timerSoundPicker');
   if(picker){
@@ -1157,10 +1300,30 @@ function renderHabitSlider(habit){
   const checklistOk = checklistComplete(habit.title, todayKey, checklist);
   const titleAttr = habit.title.replace(/"/g,'&quot;');
   const titleJs = habit.title.replace(/'/g,"\\'");
+  const auto = hasAutoGrading(habit);
+
+  if(auto){
+    // Slider de una sola zona: el usuario solo confirma "lo hice", el
+    // sistema ya decide si eso vale ✅ o 🟩 (autoClassifyOutcome). La
+    // distancia arrastrada más allá del umbral no cambia QUÉ se guarda,
+    // solo la intensidad del haptic/animación al soltar -- puramente
+    // cosmético, "más lejos, más énfasis en el premio".
+    const preview = autoClassifyOutcome(habit);
+    return `
+      <div class="flex items-center gap-2">
+        <button onclick="openModal('${titleJs}','❎')" class="flex-shrink-0 w-11 h-11 rounded-[14px] bg-[#2a1515] border border-[#ff4b4b]/50 flex items-center justify-center text-[17px] active:scale-95 transition">❎</button>
+        <div class="hslider-track flex-1" data-mode="auto" data-title="${titleAttr}" data-preview="${preview}">
+          <span class="hslider-label" style="right:14px;opacity:.5">confirmar</span>
+          <div class="hslider-thumb" style="left:6px;opacity:0">○</div>
+        </div>
+        ${timer.hasTimer ? `<button onclick="openTimerModal('${titleJs}')" class="flex-shrink-0 w-11 h-11 rounded-[14px] bg-[#0d1117] border border-[#21262d] flex items-center justify-center text-[16px] active:scale-95 transition">⏱</button>` : ''}
+      </div>`;
+  }
+
   return `
     <div class="flex items-center gap-2">
       <button onclick="openModal('${titleJs}','❎')" class="flex-shrink-0 w-11 h-11 rounded-[14px] bg-[#2a1515] border border-[#ff4b4b]/50 flex items-center justify-center text-[17px] active:scale-95 transition">❎</button>
-      <div class="hslider-track flex-1" data-title="${titleAttr}" data-locked="${timer.locked?1:0}" data-checklist-ok="${checklistOk?1:0}">
+      <div class="hslider-track flex-1" data-mode="manual" data-title="${titleAttr}" data-locked="${timer.locked?1:0}" data-checklist-ok="${checklistOk?1:0}">
         <div class="hslider-zone" style="right:0;width:45%;background:linear-gradient(270deg,${timer.locked?'#58CC0210':'#58CC0233'},transparent)"></div>
         <span class="hslider-label" style="right:${timer.locked?'40px':'12px'}">${timer.locked?'🟩':'✅'}</span>
         ${!timer.locked ? `<span class="hslider-label" style="right:50px;opacity:.35;font-size:9px">🟩</span>` : ''}
@@ -1198,7 +1361,7 @@ function habitExtraInfo(habit){
 
 let _sliderDrag = null;
 function attachSliderHandlers(){
-  document.querySelectorAll('.hslider-track').forEach(track=>{
+  document.querySelectorAll('.hslider-track[data-mode="manual"]').forEach(track=>{
     if(track.dataset.bound) return;
     track.dataset.bound = '1';
     const thumb = track.querySelector('.hslider-thumb');
@@ -1284,6 +1447,86 @@ function attachSliderHandlers(){
         setTimeout(()=>{ thumb.style.transition=''; }, 180);
       }
       curDx = g.restAt; lastZone = 'neutral';
+    }
+    track.addEventListener('pointerup', endDrag);
+    track.addEventListener('pointercancel', endDrag);
+  });
+
+  document.querySelectorAll('.hslider-track[data-mode="auto"]').forEach(track=>{
+    if(track.dataset.bound) return;
+    track.dataset.bound = '1';
+    const thumb = track.querySelector('.hslider-thumb');
+    const preview = track.dataset.preview; // ✅ o 🟩, ya calculado en el render
+
+    // Una sola zona: "sin confirmar" (reposo) vs "confirmado" (más allá
+    // del umbral). El resultado (✅/🟩) NO depende de dónde soltás --
+    // ya viene decidido por autoClassifyOutcome() en el render. Lo único
+    // que la distancia extra cambia es la intensidad del haptic/pop al
+    // soltar, como premio proporcional, puramente cosmético.
+    function geometry(){
+      const w = track.offsetWidth, tw = 40;
+      const maxOffset = w - tw - 12;
+      return { maxOffset, restAt: 0, confirmAt: 0.5*maxOffset };
+    }
+    function setThumb(dx, dragging, confirmed){
+      thumb.style.opacity = '1';
+      thumb.classList.toggle('dragging', !!dragging);
+      thumb.style.transform = `translateX(${dx}px)`;
+      if(confirmed){
+        thumb.textContent = preview;
+        thumb.style.background = preview==='✅' ? '#0d2a1a' : '#1e2a15';
+        thumb.style.borderColor = preview==='✅' ? '#58CC02' : '#a3e635';
+      } else {
+        thumb.textContent = '○';
+        thumb.style.background = '#21262d';
+        thumb.style.borderColor = '#30363d';
+      }
+    }
+
+    const g0 = geometry();
+    setThumb(g0.restAt, false, false);
+
+    let startX=0, curDx=g0.restAt, wasConfirmed=false, pointerId=null;
+
+    track.addEventListener('pointerdown', (e)=>{
+      pointerId = e.pointerId;
+      try{ track.setPointerCapture(pointerId); }catch(e){}
+      const g = geometry();
+      startX = e.clientX; curDx = g.restAt; wasConfirmed = false;
+      setThumb(g.restAt, true, false);
+    });
+    track.addEventListener('pointermove', (e)=>{
+      if(e.pointerId !== pointerId) return;
+      const g = geometry();
+      let dx = Math.max(g.restAt, Math.min(g.maxOffset, g.restAt + (e.clientX - startX)));
+      curDx = dx;
+      const confirmed = dx >= g.confirmAt;
+      setThumb(dx, true, confirmed);
+      if(confirmed !== wasConfirmed){ hapticPulse(confirmed ? 22 : 12); wasConfirmed = confirmed; }
+    });
+    function endDrag(e){
+      if(e.pointerId !== pointerId) return;
+      pointerId = null;
+      const g = geometry();
+      const title = track.dataset.title;
+      const confirmed = curDx >= g.confirmAt;
+
+      if(confirmed){
+        // premio proporcional a cuánto se pasó del umbral -- cosmético
+        const intensity = Math.min(1, (curDx-g.confirmAt)/(g.maxOffset-g.confirmAt || 1));
+        hapticPulse(preview==='✅' ? [30,40,Math.round(60+80*intensity)] : Math.round(20+15*intensity));
+        thumb.style.transition = 'transform .18s ease';
+        setTimeout(()=>{
+          thumb.style.transition = '';
+          setThumb(g.restAt, false, false);
+          openModal(title, preview);
+        }, 180);
+      } else {
+        thumb.style.transition = 'transform .18s ease';
+        setThumb(g.restAt, false, false);
+        setTimeout(()=>{ thumb.style.transition=''; }, 180);
+      }
+      curDx = g.restAt; wasConfirmed = false;
     }
     track.addEventListener('pointerup', endDrag);
     track.addEventListener('pointercancel', endDrag);
