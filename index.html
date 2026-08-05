@@ -247,6 +247,19 @@ function getHabitTimerState(habit){
   };
 }
 
+function fmtHM(ms){
+  const d=new Date(ms);
+  return d.getHours()+':'+String(d.getMinutes()).padStart(2,'0');
+}
+// "7:35 - 9:35" -- el segundo número YA incluye la gracia (⏳), porque
+// es hasta ahí que el hábito sigue siendo logueable como puntual/perfecto.
+// Hábitos sin hora fija (todo el día) devuelven '' -- no hay rango que mostrar.
+function habitTimeRangeLabel(habit){
+  const timer=getHabitTimerState(habit);
+  if(!timer.hasTimer) return '';
+  return `${fmtHM(timer.start)} - ${fmtHM(timer.deadline)}`;
+}
+
 /* ============================================================
    AUTO-CLASIFICACIÓN — el usuario deja de elegir Perfecto vs Ok a
    mano; solo confirma "lo hice" y el sistema decide, evaluando
@@ -712,6 +725,22 @@ function renderTab(){
   const last7=[]; for(let i=6;i>=0;i--){ let dt=new Date(); dt.setDate(dt.getDate()-i); let k=fmtKey(dt); let logs=byDate[k]||[]; let state='empty'; if(logs.length){ if(logs.some(l=>l.estado==='❎')) state='fail'; else if(logs.some(l=>l.estado==='✅')) state='ok'; else state='half'; } last7.push({date:dt, key:k, state}); }
 
   if(STATE.tab===0){
+    // Solo hábitos que TOCAN hoy (ver isDueToday), ordenados por hora --
+    // los sin hora fija van primero (siempre "disponibles ahora"), y entre
+    // los con hora, orden ascendente pone el actual/vencido antes que los
+    // futuros de forma natural. Los ya logueados hoy se separan aparte,
+    // atenuados -- esta pestaña es para lo que falta hacer, no un listado
+    // completo (eso sigue siendo el trabajo de la pestaña Log).
+    const todayKey = data.today.key;
+    const dueToday = data.habits.filter(h=>isDueToday(h)).map(h=>{
+      const todayLogs = h.logs.filter(l=>l.key===todayKey);
+      const todayLog = todayLogs.length ? todayLogs[todayLogs.length-1] : null;
+      const timer = getHabitTimerState(h);
+      return { h, todayLog, timer, sortKey: timer.hasTimer ? timer.start : -Infinity };
+    }).sort((a,b)=>a.sortKey-b.sortKey);
+    const pendientes = dueToday.filter(x=>!x.todayLog);
+    const completados = dueToday.filter(x=>x.todayLog);
+
     el.innerHTML = `
       <div class="rounded-[28px] bg-[#161b22] border border-[#21262d] p-8 text-center relative overflow-hidden animate-[modeSwitch_.3s_ease]" style="color:${modeColor}">
         <div class="absolute -top-20 -right-20 w-64 h-64 rounded-full blur-3xl" style="background:${modeColor}1a"></div>
@@ -737,13 +766,33 @@ function renderTab(){
 
       <div class="mt-4 rounded-[20px] bg-[#0d1117] border border-[#21262d] p-4">
         <h4 class="mono text-[11px] font-bold mb-3">INPUT RÁPIDO HOY ${data.today.emoji}${data.today.key}</h4>
-        ${data.habits.map(h=>`
+        ${pendientes.length ? pendientes.map(x=>{
+          const timeLabel = habitTimeRangeLabel(x.h);
+          return `
           <div class="py-3 border-b border-[#21262d]/50 last:border-0">
-            <div class="flex items-center gap-2 mb-2"><div class="w-2 h-2 rounded-full flex-shrink-0" style="background:${colorFor(h.title)}"></div><div class="min-w-0"><div class="font-semibold text-[14px] truncate">${h.title}</div><div class="mono text-[10px] text-[#5d666f] truncate">${h.lastLog?.raw||'sin log'}</div></div></div>
-            ${renderHabitSlider(h)}
-            ${habitExtraInfo(h)}
-          </div>
-        `).join('')}
+            <div class="flex items-center justify-between gap-2 mb-2">
+              <div class="flex items-center gap-2 min-w-0"><div class="w-2 h-2 rounded-full flex-shrink-0" style="background:${colorFor(x.h.title)}"></div><div class="min-w-0"><div class="font-semibold text-[14px] truncate">${x.h.title}</div><div class="mono text-[10px] text-[#5d666f] truncate">${x.h.lastLog?.raw||'sin log'}</div></div></div>
+              ${timeLabel ? `<div class="mono text-[10px] ${x.timer.locked?'text-[#ff7b72]':'text-[#7d8590]'} flex-shrink-0 whitespace-nowrap">${timeLabel}</div>` : ''}
+            </div>
+            ${renderHabitSlider(x.h)}
+            ${habitExtraInfo(x.h)}
+          </div>`;
+        }).join('') : `<div class="mono text-[11px] text-[#5d666f] py-2">Nada pendiente por ahora 🎉</div>`}
+        ${completados.length ? `
+          <div class="mono text-[9px] tracking-widest text-[#5d666f] font-bold mt-4 mb-1 pt-3 border-t border-[#21262d]/50">COMPLETADOS HOY</div>
+          ${completados.map(x=>{
+            const timeLabel = habitTimeRangeLabel(x.h);
+            const good = x.todayLog.estado !== '❎';
+            return `
+            <div class="py-2 flex items-center justify-between gap-2 opacity-50">
+              <div class="flex items-center gap-2 min-w-0"><div class="w-2 h-2 rounded-full flex-shrink-0" style="background:${colorFor(x.h.title)}"></div><div class="font-semibold text-[13px] truncate line-through">${x.h.title}</div></div>
+              <div class="flex items-center gap-1.5 mono text-[10px] flex-shrink-0 whitespace-nowrap">
+                ${timeLabel ? `<span class="text-[#5d666f]">${timeLabel}</span>` : ''}
+                <span class="${good?'text-[#58CC02]':'text-[#ff7b72]'}">${x.todayLog.estado}</span>
+              </div>
+            </div>`;
+          }).join('')}
+        ` : ''}
       </div>
     `;
   }
@@ -880,7 +929,7 @@ function renderAnalysisTab(el){
           <h3 class="font-bold serif italic text-[16px]">Plano X · Y</h3>
           <div class="flex bg-[#161b22] rounded-full p-1 border border-[#21262d]">
             <button onclick="STATE.chartMode='habits'; renderTab(); setTimeout(drawChart,50)" class="px-2.5 py-1 rounded-full text-[10px] mono ${STATE.chartMode!=='total'?'bg-white text-black':'text-[#7d8590]'}">HÁBITOS</button>
-            <button onclick="STATE.chartMode='total'; renderTab(); setTimeout(drawChart,50)" class="px-2.5 py-1 rounded-full text-[10px] mono ${STATE.chartMode==='total'?'bg-white text-black':'text-[#7d8590]'}">SUMA</button>
+            <button onclick="STATE.chartMode='total'; renderTab(); setTimeout(drawChart,50)" class="px-2.5 py-1 rounded-full text-[10px] mono ${STATE.chartMode==='total'?'bg-white text-black':'text-[#7d8590]'}">PROMEDIO</button>
           </div>
         </div>
         <p class="mono text-[10px] text-[#5d666f] mt-2">ok=0.5 perfecto=1 fail=-1 • piso 0 • toca un punto para ver el detalle del día</p>
@@ -890,7 +939,7 @@ function renderAnalysisTab(el){
         <div id="chartTip" class="mono text-[11px] mt-2 text-[#7d8590] min-h-[16px]">Toca el gráfico para ver el detalle de un día</div>
         <div class="flex flex-wrap gap-3 mt-3">
           ${data.habits.map(h=>`<div class="flex items-center gap-1.5 mono text-[10px]"><div class="w-3 h-[3px] rounded-full" style="background:${colorFor(h.title)}"></div>${h.title}</div>`).join('')}
-          <div class="flex items-center gap-1.5 mono text-[10px]"><div class="w-3 h-[3px] rounded-full bg-white"></div>Suma total</div>
+          <div class="flex items-center gap-1.5 mono text-[10px]"><div class="w-3 h-[3px] rounded-full bg-white"></div>Promedio</div>
         </div>
       </div>
 
@@ -971,8 +1020,13 @@ function drawChart(){
 
   const days=[]; for(let i=59;i>=0;i--){ let dt=new Date(); dt.setDate(dt.getDate()-i); days.push({dt, k:fmtKey(dt)}); }
   const perHabit={}; data.habits.forEach(h=>{ perHabit[h.title]=[]; let cum=0; days.forEach(d=>{ const mine=h.logs.filter(l=>l.key===d.k); const score=mine.reduce((s,l)=>s+l.score,0); cum=Math.max(0,cum+score); perHabit[h.title].push(cum); }); });
-  const total=days.map((_,i)=> Object.values(perHabit).reduce((s,arr)=>s+arr[i],0));
-  const maxVal=Math.max(1,...total, ...Object.values(perHabit).flat());
+  // Línea blanca = PROMEDIO entre hábitos, no suma -- así no crece
+  // artificialmente solo por tener más hábitos cargados; refleja qué tan
+  // bien te va en promedio, comparable día a día sin importar cuántos
+  // hábitos sigas.
+  const habitCount = Math.max(1, data.habits.length);
+  const promedio=days.map((_,i)=> Object.values(perHabit).reduce((s,arr)=>s+arr[i],0) / habitCount);
+  const maxVal=Math.max(1,...promedio, ...Object.values(perHabit).flat());
 
   ctx.clearRect(0,0,cssW,cssH);
   ctx.strokeStyle='#21262d'; ctx.setLineDash([4,4]);
@@ -980,7 +1034,7 @@ function drawChart(){
     ctx.setLineDash([]); ctx.fillStyle='#5d666f'; ctx.font='9px monospace'; ctx.fillText(Math.round(maxVal*i/4), 2, y+3); ctx.setLineDash([4,4]); }
   ctx.setLineDash([]);
 
-  const pointsTotal = total.map((v,i)=>({x: pad.l + (i/(days.length-1))*cw, y: pad.t + ch - (v/maxVal)*ch, v, k:days[i].k}));
+  const pointsTotal = promedio.map((v,i)=>({x: pad.l + (i/(days.length-1))*cw, y: pad.t + ch - (v/maxVal)*ch, v, k:days[i].k}));
 
   if(STATE.chartMode!=='total'){
     Object.entries(perHabit).forEach(([title,arr])=>{
@@ -999,7 +1053,7 @@ function drawChart(){
     const tip=document.getElementById('chartTip'); if(!tip) return;
     const logsThatDay=byDate[closest.k]||[];
     const detail = logsThatDay.length ? logsThatDay.map(l=>`${l.estado} ${l.motivo||''}`).join(' · ') : 'sin registros';
-    tip.innerHTML = `<strong class="text-white">${closest.k}</strong> · capital ${closest.v.toFixed(1)} · ${detail}`;
+    tip.innerHTML = `<strong class="text-white">${closest.k}</strong> · promedio ${closest.v.toFixed(2)} · ${detail}`;
   }
   canvas.onmousemove = (e)=>handleTouch(e.clientX);
   canvas.ontouchstart = canvas.ontouchmove = (e)=>{ handleTouch(e.touches[0].clientX); e.preventDefault(); };
