@@ -200,15 +200,28 @@ function parseLocationCommands(locationText){
 // explícita -- alguien pegándole directo al endpoint puede seguir mandando
 // ✅ tarde. Ver nota en el resumen de la conversación.
 function getHabitTimerState(habit){
-  const { timerMinutes, graceMinutes } = parseLocationCommands(habit.location);
-  if(!timerMinutes || !habit.todayStartTime) return { hasTimer:false, locked:false };
-  const sessionEnd = new Date(habit.todayStartTime).getTime() + timerMinutes*60000;
+  const { timerMinutes: configuredMinutes, graceMinutes } = parseLocationCommands(habit.location);
+  if(!habit.todayStartTime) return { hasTimer:false, locked:false };
+  const start = new Date(habit.todayStartTime).getTime();
+
+  // Sin ⏱N explícito: la duración natural es el propio bloque que el
+  // evento ya tiene en Calendar (fin real de hoy - inicio real de hoy).
+  // Todo hábito con hora fija tiene esto, así que la puntualidad se
+  // evalúa siempre -- ⏱N en Ubicación es un override opcional para
+  // cuando la ventana "cuenta" debe ser distinta a la del bloque.
+  let durationMinutes = configuredMinutes;
+  if(!durationMinutes && habit.todayEndTime){
+    durationMinutes = Math.round((new Date(habit.todayEndTime).getTime() - start) / 60000);
+  }
+  if(!durationMinutes || durationMinutes <= 0) return { hasTimer:false, locked:false };
+
+  const sessionEnd = start + durationMinutes*60000;
   const deadline = sessionEnd + (graceMinutes||0)*60000;
   const now = Date.now();
   const inGrace = now > sessionEnd && now <= deadline;
   return {
     hasTimer:true, deadline, sessionEnd, graceMinutes: graceMinutes||0,
-    start: new Date(habit.todayStartTime).getTime(),
+    start, durationMinutes, isDefaultDuration: !configuredMinutes,
     locked: now > deadline, inGrace,
     minutesLeft: Math.max(0, Math.ceil((deadline-now)/60000))
   };
@@ -217,10 +230,11 @@ function getHabitTimerState(habit){
 /* ============================================================
    AUTO-CLASIFICACIÓN — el usuario deja de elegir Perfecto vs Ok a
    mano; solo confirma "lo hice" y el sistema decide, evaluando
-   condiciones objetivas (puntualidad + checklist). Solo aplica a
-   hábitos con ⏱ y/o checklist configurado en Ubicación -- sin
-   ninguna de las dos, no hay nada objetivo contra qué medir, así
-   que esos hábitos siguen con el gesto manual de 2 zonas de siempre.
+   condiciones objetivas (puntualidad + checklist). Aplica a todo
+   hábito con hora real en Calendar (puntualidad siempre evaluable,
+   con o sin ⏱ explícito) y/o checklist configurado. Solo un hábito
+   de "todo el día" sin checklist se queda sin nada objetivo contra
+   qué medir, y sigue con el gesto manual de 2 zonas de siempre.
    ============================================================ */
 function hasAutoGrading(habit){
   const timer = getHabitTimerState(habit);
@@ -1098,12 +1112,12 @@ function openTimerModal(habitTitle){
   const label = document.getElementById('timerHabitLabel');
   const minutesInput = document.getElementById('timerMinutesInput');
   if(habit){
-    const { timerMinutes } = parseLocationCommands(habit.location);
+    const t = getHabitTimerState(habit);
     label.textContent = habit.title;
-    // Precarga el ⏱ configurado en Ubicación -- pero queda editable acá
-    // mismo por si esta sesión puntual necesita correr más (o menos)
-    // tiempo que el default sin tener que tocar Calendar.
-    minutesInput.value = timerMinutes || 5;
+    // Precarga la duración vigente para este hábito (⏱ explícito, o si
+    // no hay, la del propio bloque de Calendar) -- pero queda editable
+    // acá mismo por si esta sesión puntual necesita correr distinto.
+    minutesInput.value = t.hasTimer ? t.durationMinutes : 5;
   } else {
     label.textContent = '';
     minutesInput.value = 5;
@@ -1348,12 +1362,13 @@ function habitExtraInfo(habit){
     }).join('')}</div><div class="mono text-[9px] text-[#5d666f] mt-1">${done}/${checklist.length} pasos • sin completarlos todos no hay ✅ Perfecto</div>`);
   }
   if(timer.hasTimer){
+    const origen = timer.isDefaultDuration ? ` (duración del evento, ${timer.durationMinutes}min)` : '';
     if(timer.locked){
-      parts.push(`<div class="mono text-[9px] mt-1 text-[#ff7b72]">⏱ tiempo vencido${timer.graceMinutes?' (con gracia de '+timer.graceMinutes+'min incluida)':''} — Perfecto bloqueado hoy</div>`);
+      parts.push(`<div class="mono text-[9px] mt-1 text-[#ff7b72]">⏱ tiempo vencido${origen}${timer.graceMinutes?' (con gracia de '+timer.graceMinutes+'min incluida)':''} — Perfecto bloqueado hoy</div>`);
     } else if(timer.inGrace){
-      parts.push(`<div class="mono text-[9px] mt-1 text-[#f59e0b]">⏳ en gracia — quedan ${timer.minutesLeft} min para el bloqueo</div>`);
+      parts.push(`<div class="mono text-[9px] mt-1 text-[#f59e0b]">⏳ en gracia${origen} — quedan ${timer.minutesLeft} min para el bloqueo</div>`);
     } else {
-      parts.push(`<div class="mono text-[9px] mt-1 text-[#58CC02]">⏱ quedan ${timer.minutesLeft} min para Perfecto${timer.graceMinutes?' (+ '+timer.graceMinutes+'min de gracia)':''}</div>`);
+      parts.push(`<div class="mono text-[9px] mt-1 text-[#58CC02]">⏱ quedan ${timer.minutesLeft} min para Perfecto${origen}${timer.graceMinutes?' (+ '+timer.graceMinutes+'min de gracia)':''}</div>`);
     }
   }
   return parts.join('');
